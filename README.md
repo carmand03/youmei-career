@@ -2,10 +2,10 @@
 
 This repository contains the data and documentation related to a paper titled "Neither Success Nor Failure: A Sequence Analysis of Post-Return Careers of U.S.-Educated Chinese Elites (1850–1917)," published in the edited volume *Taming the Digital Dragon* (De Gruyter, 2026). 
 
-# Research context  
+# Research Context  
 This research forms the second part of a diptych aimed at reexamining the trajectories of U.S.-educated Chinese during the critical transitional period from the late Qing to the early Republic, drawing on the seminal Who’s Who of American-Returned Students, published by Tsinghua College in 1917. A previous study based on the same source focused on the social origins and family backgrounds of these early cohorts of U.S.-returned students. The present study shifts the focus from intergenerational mobility to individual trajectories, aiming to identify career patterns among the first generations of U.S.-educated Chinese and to illuminate the key factors shaping them.  
 
-# Research questions and methodology 
+# Questions and Methodology 
 
 This study uses a combination of network and sequence analysis to explore three main questions: 
 
