@@ -1,0 +1,206 @@
+---
+title: "Educational Networks of U.S. Returned Students (1917)"
+author: "Cécile Armand"
+date: "`r lubridate::today()`"
+tags: [who's who directory, biography, bilingual, network analysis, affiliation network, structural equivalence]  
+abstract: |
+  This study employs formal network analysis, implemented through the *igraph* R package, to examine US-educated Chinese educational networks, based on data from the *Who’s Who of American Returned Students* (Tsinghua, 1917).  
+  
+  <style>
+    body {
+    text-align: justify}
+  </style>
+    
+output: 
+  html_document:
+    toc: true
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    toc_depth: 3
+    number_sections: false
+    code_folding: show # hide
+    fig_caption: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(igraph)
+load(file = "educ_networks.RData")
+
+```
+
+# Education in China 
+
+## Data preparation 
+
+```{r eval = FALSE}
+
+# load original data
+
+edu_china_edge <- edu_china %>% mutate(Student = paste(DocId, name, sep = "_")) %>% select(Student, Institution)
+
+## create node list 
+
+edu_china_node_student <- edu_china_edge %>% distinct(Student) %>% rename(Name = Student) %>% mutate(Type = "Student")
+edu_china_node_univ <- edu_china_edge %>% distinct(Institution) %>% rename(Name = Institution) %>% mutate(Type = "University")
+edu_china_node <- bind_rows(edu_china_node_student, edu_china_node_univ)
+
+edu_china_node %>% group_by(Type) %>% count() # 246 students and 132 universities 
+
+# export edge list, node list and node attributes as csv files (optional)
+write.csv(edu_china_edge, "edu_china_edge.csv")
+write.csv(edu_china_node, "edu_china_node.csv")
+
+```
+
+## Create the network 
+
+```{r eval =FALSE}
+
+library(igraph)
+edu_china_net <- graph_from_data_frame(edu_china_edge, directed = FALSE, vertices = edu_china_node) 
+
+```
+
+```{r warning=FALSE, message=FALSE}
+
+# Index node size on degree centrality 
+
+deg_cent <- degree(edu_china_net, mode = "all", normalized = TRUE)
+V(edu_china_net)$size <- deg_cent * 100 
+
+# index node color on their type
+
+V(edu_china_net)$color <- ifelse(V(edu_china_net)$Type == "University", "red", "orange")
+
+plot(edu_china_net, 
+     vertex.size = V(edu_china_net)$size,
+     vertex.color = V(edu_china_net)$color,
+     vertex.label.color = "black",
+     vertex.label.cex = V(edu_china_net)$size/10,
+     main = "China Education Network")
+
+
+
+```
+
+## Community detection 
+
+```{r eval=FALSE}
+
+set.seed(2025)
+edu_china_cluster <- cluster_louvain(edu_china_net)
+
+
+sizes(edu_china_cluster)
+
+# Extract community membership 
+
+edu_china_cluster_df <- data.frame(edu_china_cluster$membership,
+                                   edu_china_cluster$names) %>% 
+  group_by(edu_china_cluster.membership) %>% 
+  add_tally() %>% # add size of clusters
+  rename(LVC_Member = edu_china_cluster.names, LVC_Cluster = edu_china_cluster.membership, LVC_Size = n)
+
+## add node type and university degree (student count)
+
+node_type <- edu_china_node %>% rename(LVC_Member = Name)
+edu_china_cluster_df <- left_join(edu_china_cluster_df, node_type)
+
+degree <- degree(edu_china_net, mode = "all", normalized = FALSE)
+degree_df <- as.data.frame(degree)
+degree_df <- rownames_to_column(degree_df, "LVC_Member")
+
+edu_china_cluster_df <- left_join(edu_china_cluster_df, degree_df) 
+
+# export to add labels (optional)
+
+write.csv(edu_china_cluster_df, "edu_china_lvc_cluster.csv")
+
+```
+
+
+# Education in the U.S.
+
+## Data preparation 
+
+```{r eval=FALSE}
+
+# load US education data 
+
+edu_us_edge <- edu_us %>% mutate(Student = paste(DocId, name, sep = "_")) %>% select(Student, Institution)
+
+## create node list 
+
+edu_us_node_student <- edu_us_edge %>% distinct(Student) %>% rename(Name = Student) %>% mutate(Type = "Student")
+edu_us_node_univ <- edu_us_edge %>% distinct(Institution) %>% rename(Name = Institution) %>% mutate(Type = "University")
+edu_us_node <- bind_rows(edu_us_node_student, edu_us_node_univ)
+
+edu_us_node %>% group_by(Type) %>% count() # 401 students and 192 universities 
+
+
+# export edge list, node list and node attributes as csv files (optional)
+write.csv(edu_us_edge, "edu_us_edge.csv")
+write.csv(edu_us_node, "edu_us_node.csv")
+
+```
+
+## Build the network
+
+```{r eval=FALSE} 
+
+edu_us_net <- graph_from_data_frame(edu_us_edge, directed = FALSE, vertices = edu_us_node)
+
+```
+
+```{r warning = FALSE, message = FALSE}
+
+# index node size on degree centrality 
+
+deg_cent_us <- degree(edu_us_net, mode = "all", normalized = TRUE)
+V(edu_us_net)$size <- deg_cent_us * 100 
+
+# index node color on their type
+
+V(edu_us_net)$color <- ifelse(V(edu_us_net)$Type == "University", "red", "orange")
+
+plot(edu_us_net, 
+     vertex.size = V(edu_us_net)$size,
+     vertex.color = V(edu_us_net)$color,
+     vertex.label.color = "black",
+     vertex.label.cex = V(edu_us_net)$size/10,
+     main = "U.S. Education Network")
+
+```
+
+## Community detection 
+
+```{r eval = FALSE}
+
+set.seed(2025)
+edu_us_cluster <- cluster_louvain(edu_us_net)
+
+# Extract community membership 
+
+edu_us_cluster_df <- data.frame(edu_us_cluster$membership,
+                                   edu_us_cluster$names) %>% 
+  group_by(edu_us_cluster.membership) %>% 
+  add_tally() %>% # add size of clusters
+  rename(LVC_Member = edu_us_cluster.names, LVC_Cluster = edu_us_cluster.membership, LVC_Size = n)
+
+## add node type and university degree (student count)
+
+node_us_type <- edu_us_node %>% rename(LVC_Member = Name)
+edu_us_cluster_df <- left_join(edu_us_cluster_df, node_us_type)
+
+degree_us <- degree(edu_us_net, mode = "all", normalized = FALSE)
+degree_us_df <- as.data.frame(degree_us)
+degree_us_df <- rownames_to_column(degree_us_df, "LVC_Member")
+
+edu_us_cluster_df <- left_join(edu_us_cluster_df, degree_us_df) 
+
+```
+

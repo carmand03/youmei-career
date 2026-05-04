@@ -1,0 +1,132 @@
+---
+title: "Employment Network of U.S. Returned Students (1917)"
+author: "Cécile Armand"
+date: "`r lubridate::today()`"
+tags: [who's who directory, biography, bilingual, network analysis, affiliation network, structural equivalence]  
+abstract: |
+  This study employs formal network analysis, implemented through the *igraph* R package, to examine US-educated Chinese professional networks, based on data from the *Who’s Who of American Returned Students* (Tsinghua, 1917).  
+  
+  <style>
+    body {
+    text-align: justify}
+  </style>
+    
+output: 
+  html_document:
+    toc: true
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    toc_depth: 3
+    number_sections: false
+    code_folding: show # hide
+    fig_caption: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(igraph)
+load(file = "employ_network.RData")
+
+```
+
+
+# Data preparation 
+
+```{r eval = FALSE}
+
+## load data on professional affiliation
+
+career_post <- read_delim("Data/career_post.csv", delim = ";", escape_double = FALSE, trim_ws = TRUE) 
+
+```
+
+```{r warning=FALSE, message=FALSE, eval=FALSE}
+
+## create edge list
+
+employers <- career_post %>% mutate(Student = paste(DocId, name_source, sep = "_"))
+employers <- left_join(name, employers) 
+employers <- employers %>% rename(name = name_source)
+employ_edge <- employers %>% distinct(Student, Institution) %>% drop_na() 
+
+## create node list 
+
+employ_node_student <- employ_edge %>% distinct(Student) %>% rename(Name = Student) %>% mutate(Type = "Student")
+employ_node_instit <- employ_edge %>% distinct(Institution) %>% rename(Name = Institution) %>% mutate(Type = "Institution")
+employ_node <- bind_rows(employ_node_student, employ_node_instit)
+employer_attribute <- employers %>% distinct(Institution, sector, city, province) %>% group_by(sector) %>% add_tally()
+
+employ_node %>% group_by(Type) %>% count() # 358 students and 476 employers 
+
+# export edge list, node list and node attributes as csv files (optional)
+# write.csv(employ_edge, "employ_edge.csv")
+# write.csv(employ_node, "employ_node.csv")
+# write.csv(employer_attribute, "employer_attribute.csv")
+
+```
+
+# Build the network
+
+```{r warning = FALSE, message = FALSE}
+
+employ_net <- graph_from_data_frame(employ_edge, directed = FALSE, vertices = employ_node) # 834 nodes, 1093 edges
+
+# Visualize the network 
+
+##  index node size on degree centrality 
+
+employ_deg_norm <- degree(employ_net, mode = "all", normalized = TRUE)
+V(employ_net)$size <- employ_deg_norm * 100 
+
+###  index node color on their type
+
+V(employ_net)$color <- ifelse(V(employ_net)$Type == "Institution", "red", "orange")
+
+plot(employ_net, 
+     vertex.size = V(employ_net)$size,
+     vertex.color = V(employ_net)$color,
+     vertex.label.color = "black",
+     vertex.label.cex = V(employ_net)$size/5,
+     main = "Employer Network")
+
+
+```
+
+# Community detection 
+
+```{r warning = FALSE, message = FALSE}
+
+set.seed(2025)
+employ_cluster <- cluster_louvain(employ_net)
+
+### 74 communities were found, including from 2 to 56 members
+
+sizes(employ_cluster)
+
+##  Extract community membership 
+
+employ_cluster_df <- data.frame(employ_cluster$membership,
+                                     employ_cluster$names) %>% 
+  group_by(employ_cluster.membership) %>% 
+  add_tally() %>% # add size of clusters
+  rename(LVC_Member = employ_cluster.names, LVC_Cluster = employ_cluster.membership, LVC_Size = n)
+
+## add node type and university degree (student count)
+
+employ_node_type <- employ_node %>% rename(LVC_Member = Name)
+employ_cluster_df <- left_join(employ_cluster_df, employ_node_type)
+
+employ_degree <- degree(employ_net, mode = "all", normalized = FALSE)
+employ_degree_df <- as.data.frame(employ_degree)
+employ_degree_df <- rownames_to_column(employ_degree_df, "LVC_Member")
+
+employ_cluster_df <- left_join(employ_cluster_df, employ_degree_df) 
+
+# export to add labels (optional)
+# write.csv(employ_cluster_df, "employ_cluster.csv")
+
+```
+
