@@ -1,0 +1,437 @@
+---
+title: "Career Determinants of U.S. Returned Students (1917)"
+author: "Cécile Armand"
+date: "`r lubridate::today()`"
+tags: [who's who directory, biography, bilingual, histtext, MCA]  
+abstract: |
+ This document details the construction of the supplementary, synthetic variables used in the Multiple Correspondence Analysis (MCA) of career determinants and provides basic statistical summaries of these variables.
+  
+  <style>
+    body {
+    text-align: justify}
+  </style>
+    
+output: 
+  html_document:
+    toc: true
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    toc_depth: 2
+    number_sections: false
+    code_folding: show # hide
+    fig_caption: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(hrbrthemes)
+load(file = "~/Ladder/Revised/Scripts/supvariables.RData")
+
+```
+
+```{r warning = FALSE, message = FALSE}
+
+library(tidyverse)
+library(hrbrthemes)
+
+```
+
+# Data construction 
+
+## Work experience 
+
+```{r eval = FALSE}
+
+# Before studying in the U.S. 
+
+work_pre <- read_delim("Data/input/work_pre.csv", 
+                       delim = ";", escape_double = FALSE, trim_ws = TRUE)
+
+work_pre <- left_join(work_pre, name)
+
+work_pre <- work_pre %>% mutate(Student = paste(DocId, name_source, sep = "_")) %>% 
+  mutate(Work_pre_US = "YES") %>% 
+  select(Student, Work_pre_US, n, positions) %>% 
+  rename(Work_pre_US_Nb = n, Work_pre_US_Nature = positions)
+
+# In the US 
+
+work_us <- read_csv("Data/input/work_us.csv", 
+                    col_types = cols(...1 = col_skip()))
+
+work_us <- left_join(work_us, name)
+
+work_us <- work_us %>% mutate(Student = paste(DocId, name_source, sep = "_")) %>% 
+  mutate(Work_US = "YES") %>% 
+  select(Student, Work_US, n, instit) %>% 
+  rename(Work_US_Nb = n, Work_US_Nature = instit)
+
+## Join 
+
+work_experience <- full_join(work_pre, work_us)
+
+
+```
+
+## Chinese degrees 
+```{r eval = FALSE}
+
+chinese_degrees <- read_csv("Data/input/chinese_degrees2.csv")
+
+chinese_degrees <- left_join(chinese_degrees, name)
+
+chinese_degrees <- chinese_degrees %>% mutate(Student = paste(DocId, name_source, sep = "_")) %>% 
+  mutate(Exam = "YES") %>% 
+  rename(Exam_year = Year) %>%
+  select(Student, Exam, Degree_zh, Exam_year)
+
+# join with work experience
+
+exam_work_experience <- full_join(chinese_degrees, work_experience)
+
+exam_work_experience <- exam_work_experience %>%
+  mutate(across(c(Exam, Work_pre_US, Work_US), ~replace_na(.x, "NO")))
+
+```
+
+## Highest foreign degree
+
+```{r eval = FALSE}
+
+high_deg_all <- read_csv("Data/input/high_deg_all.csv")
+
+highest_degree <- left_join(high_deg_all, name)
+
+highest_degree <- highest_degree %>% 
+  mutate(Student = paste(DocId, name_source, sep = "_")) %>% 
+  rename(Highest_degree = Highest) %>% 
+  select(Student, Highest_degree)
+
+exam_work_experience <- full_join(exam_work_experience, highest_degree)
+```
+
+## Distinctions
+
+```{r eval = FALSE}
+
+# search for distinctions/award, etc
+
+library(histtext)
+
+prize <- histtext::search_concordance_ex('"decoration"|"prize"|"distinction"|"award"|"medal"|"awarded"', 
+                                         corpus = "imh-en", context_size = 200, 
+                                         filter_query = list(book = "游美同學錄"))
+
+
+prize %>% group_by(DocId) %>% count(sort = TRUE) %>% print(n = 75)
+
+
+# total of 146 results were found distributed among 75 individuals, from 1 to 5 each
+
+distinction <- prize %>% group_by(DocId) %>% count() %>% rename(Distinction_Nb = n) 
+distinction <- distinction %>% mutate(Distinction = "YES") %>% select(DocId, Distinction, Distinction_Nb)
+
+# join with other data 
+
+distinction <- left_join(distinction, name)
+
+distinction <- distinction %>% 
+  mutate(Student = paste(DocId, name_source, sep = "_")) %>% select(Student, Distinction, Distinction_Nb)
+
+exam_work_experience_prize <- full_join(exam_work_experience, distinction)
+```
+
+## Scholarships
+
+```{r eval = FALSE}
+
+# search for scholarship, etc
+
+library(histtext)
+
+scholarship <- histtext::search_concordance('"Scholarship"|"Fellowship"', 
+                                            corpus = "imh-en", context_size = 200, 
+                                            filter_query = list(book = "游美同學錄"))
+
+scholarship_filtered <- scholarship %>%
+  filter(grepl("^[A-Z]", Matched))
+
+# a total of 21 results, up to 2 per individual
+
+scholarship %>% group_by(DocId) %>% count(sort = TRUE)
+
+scholarship_count <- scholarship %>% group_by(DocId) %>% count() %>% rename(Scholarship_Nb = n) 
+scholarship_count <- scholarship_count %>% mutate(Scholarship = "YES") %>% select(DocId, Scholarship, Scholarship_Nb)
+
+scholarship_count <- left_join(scholarship_count, name)
+
+scholarship_count <- scholarship_count %>% 
+  mutate(Student = paste(DocId, name_source, sep = "_")) %>% select(Student, Scholarship, Scholarship_Nb)
+
+scholarship_count$DocId <- NULL
+
+exam_work_experience_prize <- full_join(exam_work_experience_prize, scholarship_count)
+
+# replace NA
+
+exam_work_experience_prize <- exam_work_experience_prize %>%
+  mutate(across(c(Exam, Work_pre_US, Work_US, Distinction, Scholarship), ~replace_na(.x, "NO")))
+
+
+```
+
+## Bind all variables 
+
+```{r eval = FALSE}
+
+# Join with metadata 
+
+meta_add <- main_data_all %>% select(DocId, name_source, FullName_zh, FullName_py, gender)
+meta_add <- left_join(meta_all, meta_add)
+
+meta_add <- meta_add %>% 
+  mutate(Student = paste(DocId, name_source, sep = "_")) 
+
+meta <- meta_add %>% rename(Gender = gender, Returned_period = returned_period) %>% 
+  select(Student, DocId, 
+         FullName_zh, FullName_py, 
+         Generation, Returned_period, 
+         Gender, Nativeplace, 
+         Funding, Discipline)
+
+# join with work experience and degrees
+
+exam_work_experience_prize$DocId <- NULL 
+
+meta <- left_join(meta, exam_work_experience_prize)
+meta <- meta %>% relocate(Highest_degree, .after = Discipline)
+
+# join with clusters 
+
+library(readr)
+edu_china_cluster_lvc <- read_delim("Networks/clusters/edu_china_cluster_lvc.csv", 
+                                    delim = ";", escape_double = FALSE, trim_ws = TRUE)
+
+edu_us_cluster_lvc <- read_delim("Networks/clusters/edu_us_cluster_lvc.csv", 
+                                 delim = ";", escape_double = FALSE, trim_ws = TRUE)
+
+employ_cluster_lvc <- read_delim("Networks/clusters/employ_cluster_lvc.csv", 
+                                 delim = ";", escape_double = FALSE, trim_ws = TRUE)
+
+assoc_cluster_lvc <- read_delim("Networks/clusters/assoc_cluster_lvc.csv", 
+                                delim = ";", escape_double = FALSE, trim_ws = TRUE)
+
+edu_us_cluster_lvc <- edu_us_cluster_lvc %>%
+  mutate(us_prestige = case_when(
+    edu_us_lvc_size < 10 ~ "low",
+    edu_us_lvc_size >= 10 & edu_us_lvc_size < 30 ~ "medium",
+    edu_us_lvc_size >= 30 ~ "high"))
+
+# join clusters with metadata 
+
+meta_clusters <- left_join(meta, edu_china_cluster_lvc)
+meta_clusters <- left_join(meta_clusters, edu_us_cluster_lvc)
+meta_clusters <- left_join(meta_clusters, employ_cluster_lvc)
+meta_clusters <- left_join(meta_clusters, assoc_cluster_lvc)
+
+
+meta_clusters <- meta_clusters %>%
+  mutate(Funding2 = fct_collapse(as.factor(Funding),
+                                 Private = c("Private support", "Unknown"),
+                                 Public  = c("Government support", "Partial support")))
+
+meta_clusters <- meta_clusters %>% relocate(Funding2, .after = Funding)
+
+```
+
+
+# Statistical Summaries
+
+
+```{r warning = FALSE, message = FALSE}
+
+# Load data and list variables
+
+meta_clusters
+main_data_all
+
+```
+
+## Generation/Cohorts
+
+```{r warning = FALSE, message = FALSE}
+
+meta_clusters %>% group_by(Generation) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+meta_clusters %>% group_by(Returned_period) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+
+```
+<br>
+<div class="alert alert-success" role="alert"> 
+**Note on the periodization**
+
+Taking the Boxer Indemnity Remission as cut-off date: 
+
+  1. Pre-Boxer (1881-1908)
+  2. Post-Boxer (1881-1909)
+  
+A finer periodization based on domestic reforms:  
+
+  1. Pioneers (1881-1905)
+  2. Post-examination (1906-1911)
+  3. Post-revolution (1912-1917)
+</div>
+
+## Gender
+
+```{r warning = FALSE, message = FALSE}
+
+meta_clusters %>% group_by(Gender) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+
+```
+
+## Native Place
+
+```{r warning = FALSE, message = FALSE}
+
+meta_clusters %>% group_by(Nativeplace) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+main_data_all %>% group_by(Birth_Province_eng_standard) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+
+```
+
+## Funding
+
+```{r warning = FALSE, message = FALSE}
+
+meta_clusters %>% group_by(Funding2) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+meta_clusters %>% group_by(Funding) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+
+```
+## Discipline
+
+```{r warning = FALSE, message = FALSE}
+
+meta_clusters %>% group_by(Discipline) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+main_data_all %>% group_by(field_of_study) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+
+```
+## Degrees
+
+```{r warning = FALSE, message = FALSE}
+
+# What was the highest degree obtained abroad? 
+meta_clusters %>% group_by(Highest_degree) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+
+# Did he/she passed the special examination for returned students? 
+meta_clusters %>% group_by(Exam) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+
+# If yes, when? 
+meta_clusters %>% group_by(Exam_year) %>% count(sort = TRUE) 
+
+library(tidyverse)
+library(hrbrthemes)
+
+meta_clusters %>% drop_na(Exam_year) %>% 
+  ggplot( aes(x=Exam_year)) +
+  geom_histogram( binwidth=1, fill="#69b3a2", color="#e9ecef", alpha=0.9) +
+  ggtitle("Timeline of Post-return Examinations") +
+  theme_ipsum() +
+  theme(
+    plot.title = element_text(size=15)
+  ) +
+  labs(x = "Year",
+       y = "Frequency", 
+       caption = "Source: Who's Who of American-Returned Students (1917)")
+
+# If yes, what equivalent Chinese degree passed did he/she obtained? 
+
+meta_clusters %>% group_by(Degree_zh) %>% count(sort = TRUE) 
+
+```
+
+## Prior Work Experience
+
+### In China
+
+```{r warning = FALSE, message = FALSE}
+
+meta_clusters %>% group_by(Work_pre_US) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+meta_clusters %>% drop_na(Work_pre_US) %>% group_by(Work_pre_US_Nb) %>% count()
+meta_clusters %>% group_by(Work_pre_US_Nature) %>% count(sort = TRUE)
+
+```
+
+### In the U.S.
+
+```{r warning = FALSE, message = FALSE}
+
+meta_clusters %>% group_by(Work_US) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+
+# If yes, in which discipline did they major? 
+
+meta_clusters %>% drop_na(Work_US) %>% group_by(Discipline) %>% count(sort = TRUE)
+
+# How many different jobs did they hold? 
+meta_clusters %>% group_by(Work_US_Nb) %>% count(sort = TRUE)
+
+# In which sectors? 
+meta_clusters %>% group_by(Work_US_Nature) %>% count(sort = TRUE)
+
+```
+
+## Distinction/Scholarship
+
+```{r warning = FALSE, message = FALSE}
+
+# Did they receive special distinctions? 
+meta_clusters %>% group_by(Distinction) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+
+# How many? 
+meta_clusters %>% drop_na(Distinction) %>% group_by(Distinction_Nb) %>% count()
+
+# Did they receive special scholarships? 
+meta_clusters %>% group_by(Scholarship) %>% count(sort = TRUE) %>% mutate(percent = round(n/401*100, 2))
+
+# How many? 
+meta_clusters %>% drop_na(Scholarship) %>% group_by(Scholarship_Nb) %>% count()
+
+```
+
+## Prior Education
+
+```{r warning = FALSE, message = FALSE}
+
+meta_clusters %>% group_by(edu_china_lvc_Label) %>% count(sort = TRUE)
+meta_clusters %>% group_by(edu_china_lvc_Label2) %>% count(sort = TRUE)
+
+```
+
+## U.S. Education
+
+```{r warning = FALSE, message = FALSE}
+
+meta_clusters %>% group_by(edu_us_lvc_Label) %>% count(sort = TRUE)
+meta_clusters %>% group_by(edu_us_lvc_Label2) %>% count(sort = TRUE)
+meta_clusters %>% group_by(us_prestige) %>% count(sort = TRUE)
+
+```
+
+## Post-Return Employment
+
+```{r warning = FALSE, message = FALSE}
+
+meta_clusters %>% group_by(employ_lvc_cluster_label) %>% count(sort = TRUE)
+
+```
+
+## Associative Life
+
+```{r warning = FALSE, message = FALSE}
+
+meta_clusters %>% group_by(Activism) %>% count(sort = TRUE)
+meta_clusters %>% group_by(assoc_lvc_Label) %>% count(sort = TRUE)
+meta_clusters %>% group_by(assoc_lvc_Label2) %>% count(sort = TRUE)
+
+```
