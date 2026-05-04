@@ -1,0 +1,145 @@
+---
+title: "Mapping Educational Networks of U.S.-Educated Chinese (1917)"
+author: "Cécile Armand"
+date: "`r lubridate::today()`"
+tags: [who's who directory, biography, bilingual, network analysis, GIS]  
+abstract: |
+  This study employs geographic information system (GIS), implemented through the *leaflet* R package, to visualize US-educated Chinese educational geography, using data from the *Who’s Who of American Returned Students* (Tsinghua, 1917).  
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+library(igraph)
+library(dplyr)
+library(readr)
+library(leaflet)
+library(scales)
+library(htmlwidgets)
+
+load(file = "us_map.RData")
+```
+
+# Preliminary steps
+
+```{r warning = FALSE, message=FALSE}
+# load packages
+
+library(igraph)
+library(dplyr)
+library(readr)
+library(leaflet)
+library(scales)
+
+```
+
+```{r warning = FALSE, message=FALSE, eval = FALSE}
+
+# Load data
+
+edges <- edu_us_edges_wght
+coords <- us_coord %>% rename(university = Institution)
+
+```
+
+# Build the map 
+```{r warning = FALSE, message=FALSE}
+
+# Build graph and compute centrality
+
+g <- graph_from_data_frame(edges, directed = FALSE)
+deg_centrality <- degree(g) / (vcount(g) - 1)
+
+# Create node df with centrality and coords
+
+nodes <- data.frame(university = names(deg_centrality),
+                    centrality = deg_centrality) %>%
+  left_join(coords, by = "university") %>%
+  filter(!is.na(Latitude), !is.na(Longitude))
+
+# Add region-based color
+
+nodes <- nodes %>%
+  mutate(color = case_when(
+    Longitude >= -82 & Longitude <= -66 ~ "red",       # East Coast
+    Longitude >= -125 & Longitude <= -117 ~ "blue",    # West Coast
+    TRUE ~ gradient_n_pal(c("yellowgreen", "orange"))(
+      rescale(Longitude, to = c(0, 1), from = c(-117, -82))
+    )
+  ))
+
+# Join node coords to edge list
+
+edges_geo <- edges %>%
+  left_join(coords, by = c("from" = "university")) %>%
+  rename(lat_from = Latitude, lon_from = Longitude) %>%
+  left_join(coords, by = c("to" = "university")) %>%
+  rename(lat_to = Latitude, lon_to = Longitude) %>%
+  filter(!is.na(lat_from) & !is.na(lat_to))
+
+# Create map
+
+m <- leaflet() %>%
+  addProviderTiles("CartoDB.Positron")
+
+# Add edges (as polylines)
+
+for (i in 1:nrow(edges_geo)) {
+  m <- m %>% addPolylines(
+    lng = c(edges_geo$lon_from[i], edges_geo$lon_to[i]),
+    lat = c(edges_geo$lat_from[i], edges_geo$lat_to[i]),
+    weight = edges_geo$weight[i] * 0.5,
+    color = "gray",
+    opacity = 0.4
+  )
+}
+
+# Add nodes
+m <- m %>%
+  addCircleMarkers(
+    data = nodes,
+    lng = ~Longitude, lat = ~Latitude,
+    radius = ~centrality * 20,
+    color = ~color,
+    fillOpacity = 0.8,
+    popup = ~paste0(university, "<br>Centrality: ", round(centrality, 3))
+  )
+
+m
+```
+
+# Add legend
+
+```{r warning = FALSE, message=FALSE}
+
+# Add manual legend for centrality (size scale)
+m <- m %>% addLegend(
+  position = "bottomleft",
+  colors = "gray",
+  labels = c("Higher centrality → larger node"),
+  title = "Degree Centrality"
+)
+
+m <- m %>% addLegend(
+  position = "bottomright",
+  colors = c("red", "orange", "yellowgreen", "blue"),
+  labels = c("East Coast", "Midwest", "Central", "West Coast"),
+  title = "Region",
+  opacity = 1
+)
+
+m
+
+```
+
+```{r warning=TRUE, message=FALSE}
+
+# save the widgets (optional)
+
+# library(htmlwidgets)
+# htmlwidgets::saveWidget(m, "university_network_map.html")
+
+```
+

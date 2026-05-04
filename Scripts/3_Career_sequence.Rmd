@@ -1,0 +1,1009 @@
+---
+title: "Sequence Analysis of U.S. Returned Students' Careers (1917)"
+author: "Cécile Armand"
+date: "`r lubridate::today()`"
+abstract: |
+  This study employs sequence analysis, implemented through the TraMineR library, to examine the career trajectories of US-educated Chinese based on data from the Who’s Who of American Returned Students (Tsinghua, 1917).     
+
+  <style>
+    body {
+      text-align: justify;
+    }
+  </style>
+
+output: 
+  html_document:
+    toc: true
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    toc_depth: 2
+    number_sections: false
+    code_folding: show
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(TraMineR)
+library(WeightedCluster)
+library(FactoMineR)
+library(Factoshiny)
+library(forcats)
+
+```
+
+```{r echo=FALSE}
+
+load("~/Ladder/sequence.RData")
+
+```
+
+
+# Introduction 
+
+After examining career beginnings of U.S.-returned students, the study employs sequence analysis, implemented through the TraMineR library, to examine their subsequent career trajectories. Sequence analysis is conducted across three dimensions: (1) position level, (2) sector of employment, and (3) place of work to examine **vertical, horizontal, and geographical mobility**. Moreover, sequence analysis combines three temporal dimensions: the calendar year of each position, age at the time of the position, and time elapsed since return.
+
+The analysis follows a four-step approach: 
+
+  (1) **Sequence analysis** is applied to the 358 individuals with sufficient career data for each dimension; 
+  (2) **Hierarchical clustering** is performed on the resulting sequences to identify recurring career patterns;
+  (3) **Multiple Correspondence Analysis (MCA)** is conducted to identify patterns of multidimensional mobility, as well as the influence of biographical and contextual attributes. These attributes are incorporated into the MCA in a second step.
+  (4) **Sequence metrics analysis**: To alleviate the shortcomings of sequence clustering analysis and MCA, the final section computes various quantitative indicators for the three sequence series and applies principal component analysis (PCA) to identify clusters of sequences that share similar profiles.
+  
+# Data preparation 
+
+```{r message = FALSE, warning=FALSE}
+
+# load required packages
+
+library(tidyverse)
+library(WeightedCluster)
+library(FactoMineR)
+library(Factoshiny)
+library(forcats)
+
+```
+
+
+```{r message = FALSE, warning=FALSE}
+
+# load position data
+
+career_seq
+
+```
+<br>
+The resulting dataset includes a total of 1,001 positions across 263 individuals for whom more than one position is reported, representing 65.6% of the initial population (N = 401).
+
+
+```{r message = FALSE, warning=FALSE, eval=FALSE}
+
+# load attribute data 
+
+main_data_all <- read_delim("main_data.csv", delim = ";", escape_double = FALSE, trim_ws = TRUE)
+main_data_filtered <- main_data_all %>% filter(DocId %in% career_seq$DocId)
+
+```
+
+```{r message = FALSE, warning=FALSE}
+
+main_data_filtered
+
+```
+
+# Sequence Analysis
+
+## Vertical Mobility
+
+### Build sequences
+```{r message = FALSE, warning=FALSE}
+
+# Define alphabet, labels and color scheme 
+
+levels <- seqstatl(career_seq$level_code)
+
+levlabels <- c("Other", "Student", "Junior", "Mid-level", 
+               "Senior",  "Executive", 
+               "Top executive")
+
+levcolor <- c("#78c679", "#4575b4", "#91bfdb", "#e0f3f8", "#fee090", "#fc8d59", "#d73027")
+
+# Create sequence object 
+
+levseq <- seqdef(career_seq, var = c("DocId", "start", "end", "level_code"), 
+                 informat = "SPELL", states = levels, labels = levlabels, process = FALSE,  
+                 cpal = levcolor)
+
+# Set year of birth as starting point and compute age at position (using the "process" argument)
+
+
+levseq_birth <- seqdef(career_seq, var = c("DocId", "start", "end", "level_code"), 
+                    informat = "SPELL", states = levels, labels = levlabels,
+                    process = TRUE, 
+                    pdata = main_data_filtered, 
+                    pvar = c("DocId", "birth_year"),  
+                    cpal = levcolor)
+
+
+# Focus on the relevant time frame (16-70 y.o.) 
+
+levseq_birth_16 <- levseq_birth[, 16:70]
+
+# Set year of return as starting point
+
+levseq_return <- seqdef(career_seq, var = c("DocId", "start", "end", "level_code"), 
+                        informat = "SPELL", states = levels, labels = levlabels,
+                        process = TRUE, 
+                        pdata = main_data_filtered, 
+                        pvar = c("DocId", "estimated_returned_year"),  
+                        cpal = levcolor)
+
+# Rename columns 
+
+colnames(levseq_return) <- gsub("^a", "r", colnames(levseq_return))
+
+# Focus on the relevant time frame (1-38 years post-return) 
+
+levseq_return_38 <- levseq_return[, 1:38]
+
+```
+<br>
+<div class="alert alert-danger" role="alert"> 
+Note: '%' represent void elements (beginning or end of sequence) whereas * represent gaps or missing data within sequences.</div>
+
+### Visualize sequences
+```{r message = FALSE, warning=FALSE}
+
+# state distribution plots 
+
+par(mar = c(2, 4, 2, 0.5))
+par(mfrow = c(2, 2))
+seqdplot(levseq, cex.legend=0.7, with.legend = FALSE, border = NA) # based on calendar year
+seqdplot(levseq_birth_16, cex.legend=0.7, with.legend = FALSE, border = NA) # based on age at position
+seqdplot(levseq_return_38, cex.legend=0.7, with.legend = FALSE, border = NA) # based on time elapsed since return
+seqlegend(levseq, cex = 1) # legend
+
+```
+
+### Statistical analyses 
+```{r warning=FALSE, message = FALSE}
+
+# number of distinct sequences (210)
+seqtab(levseq, idx=0) %>% nrow 
+
+# most frequent sequences 
+print(seqtab(levseq))
+
+```
+
+```{r warning=FALSE, message = FALSE}
+
+# Entropy, state and mean time distribution
+
+par(mar = c(2, 2, 2, 0.5))
+par(mfrow = c(2, 2))
+seqdplot(levseq, with.legend = FALSE, border = NA)  # state distribution plot
+seqmsplot(levseq, with.legend = FALSE, border = NA) # modal state plot
+seqmtplot(levseq, with.legend = FALSE, ylim=c(0, 2)) # mean time plot
+seqHtplot(levseq) # transversal entropy plot 
+
+```
+
+### Distinct subsequences
+
+```{r warning=FALSE, message = FALSE}
+
+# Extract the distinct state-sequence (DSS) for each sequence 
+
+level_dss <- seqdss(levseq)
+head(level_dss)
+seqtab(level_dss, idx=0) # full list of sub-sequences with their frequencies
+
+# number of distinct sub-sequences
+seqtab(level_dss, idx=0) %>% nrow # 74 unique distinct subsequences 
+print(seqtab(level_dss))
+
+```
+
+
+## Horizontal Mobility
+
+### Build sequences 
+```{r warning=FALSE, message = FALSE}
+
+# Define alphabet, label and color code 
+
+sector <- seqstatl(career_seq$sector_code)
+
+sector_label <- c("Central Admin", "Local Admin", "Banking", "Education", "Engineering", 
+                  "Central Govt", "Local Govt", "Other", "Private", "Railway")
+
+sector_color <- c("#feb24c", "#b2df8a","#6a3d9a", "#fff7bc", "#1f78b4", "#e31a1c", "#31a354", "#b15928", "#cab2d6", "#a6cee3")
+
+
+# Create sequences
+
+sectseq <- seqdef(career_seq, var = c("DocId", "start", "end", "sector_code"), 
+                  informat = "SPELL", process = FALSE, 
+                  states = sector, labels = sector_label,  
+                  cpal = sector_color)
+
+# set year of birth as starting point and compute age at position (using the "process" argument)
+
+sectseq_birth <- seqdef(career_seq, var = c("DocId", "start", "end", "sector_code"), 
+                        informat = "SPELL",
+                        process = TRUE, 
+                        states = sector, labels = sector_label,  
+                        cpal = sector_color,
+                        pdata = main_data_filtered, 
+                        pvar = c("DocId", "birth_year"))
+
+# focus on the relevant time frame (16-70 y.o.) 
+
+sectseq_birth_16 <- sectseq_birth[, 16:70]
+
+# set year of return as starting point  (using the "process" argument)
+
+sectseq_return <- seqdef(career_seq, var = c("DocId", "start", "end", "sector_code"), 
+                        informat = "SPELL", 
+                        process = TRUE, 
+                        states = sector, labels = sector_label,  
+                        cpal = sector_color,
+                        pdata = main_data_filtered, 
+                        pvar = c("DocId", "estimated_returned_year"))
+
+
+# rename columns 
+
+colnames(sectseq_return) <- gsub("^a", "r", colnames(sectseq_return))
+
+# focus on the relevant time frame (from 1 to 38 year after return) 
+
+sectseq_return_38 <- sectseq_return[, 1:38]
+
+```
+
+## Visualize sequences
+
+```{r warning=FALSE, message = FALSE}
+
+par(mar = c(2, 4, 2, 0.5))
+par(mfrow = c(2, 2))
+seqdplot(sectseq, cex.legend=0.7, with.legend = FALSE, border = NA)
+seqdplot(sectseq_birth_16, cex.legend=0.7, with.legend = FALSE, border = NA)
+seqdplot(sectseq_return_38, cex.legend=0.7, with.legend = FALSE, border = NA)
+seqlegend(sectseq, ncol = 1, cex = 1)
+
+```
+
+### Statistical Analysis
+
+```{r warning=FALSE, message = FALSE}
+
+# number of distinct sequences
+seqtab(sectseq, idx=0) %>% nrow # 226 unique sequences (out of 263)
+print(seqtab(sectseq))
+
+```
+```{r warning=FALSE, message = FALSE}
+
+# Entropy, state and mean time distribution
+
+par(mar = c(2, 2, 2, 0.5))
+par(mfrow = c(2, 2))
+seqdplot(sectseq, with.legend = FALSE, border = NA)
+seqmsplot(sectseq, with.legend = FALSE, border = NA)
+seqmtplot(sectseq, with.legend = FALSE, ylim=c(0, 2))
+seqHtplot(sectseq)
+
+```
+
+```{r warning=FALSE, message = FALSE}
+
+# Distinct subsequences 
+
+sect_dss <- seqdss(sectseq)
+head(sect_dss)
+seqtab(sect_dss, idx=0) # full list of sub-sequences with their frequencies
+
+# number of distinct sub-sequences
+seqtab(sect_dss, idx=0) %>% nrow # 115 unique distinct subsequences 
+print(seqtab(sect_dss))
+
+
+```
+
+## Geographical Mobility
+
+### Build sequences 
+```{r warning=FALSE, message = FALSE}
+
+# Define alphabet, labels, and color scheme 
+
+areas <- seqstatl(career_seq$area)
+area_label <- c("Overseas", "Beijing-Tianjin", "Guangdong", "Jiangnan", "Other (China)", "Shanghai")
+area_color <- c("#91bfdb", "#d53e4f", "#fc8d59", "#fff7bc", "#addd8e", "#c994c7")
+
+# set birth year as starting point 
+
+geoseq_birth <- seqdef(career_seq, var = c("DocId", "start", "end", "area"), 
+                 informat = "SPELL", process = TRUE, 
+                 states = areas,  
+                 labels = area_label,
+                 cpal = area_color,
+                 pdata = main_data_filtered, 
+                 pvar = c("DocId", "birth_year"))
+
+# focus on the relevant time frame (16-60 y.o. 
+geoseq_birth_16 <- geoseq_birth[, 16:60]
+
+# set return year as starting point 
+
+geoseq_return <- seqdef(career_seq, var = c("DocId", "start", "end", "area"), 
+                       informat = "SPELL", process = TRUE, 
+                       states = areas, 
+                       labels = area_label,
+                       cpal = area_color,
+                       pdata = main_data_filtered, 
+                       pvar = c("DocId", "estimated_returned_year"))
+
+# rename columns 
+
+colnames(geoseq_return) <- gsub("^a", "r", colnames(geoseq_return))
+
+# focus on the relevant time frame (from 1 to 38 year after return) 
+geoseq_return_38 <- geoseq_return[, 1:38]
+
+
+```
+
+### Visualize sequences 
+
+```{r warning=FALSE, message = FALSE}
+
+par(mar = c(2, 4, 2, 0.5))
+par(mfrow = c(2, 2))
+seqdplot(geoseq, cex.legend=0.7, with.legend = FALSE, border = NA)
+seqdplot(geoseq_birth_16, cex.legend=0.7, with.legend = FALSE, border = NA)
+seqdplot(geoseq_return_38, cex.legend=0.7, with.legend = FALSE, border = NA)
+seqlegend(geoseq, cex = 1)
+
+```
+
+### Statistical analysis 
+
+```{r warning=FALSE, message = FALSE}
+
+# number of distinct sequences
+
+seqtab(geoseq, idx=0) %>% nrow # 212 unique sequences
+print(seqtab(geoseq))
+
+
+# Entropy, state and mean time distribution
+
+par(mar = c(2, 2, 2, 0.5))
+par(mfrow = c(2, 2))
+seqdplot(geoseq, with.legend = FALSE, border = NA)
+seqmsplot(geoseq, with.legend = FALSE, border = NA)
+seqmtplot(geoseq, with.legend = FALSE, ylim=c(0, 2))
+seqHtplot(geoseq)
+
+```
+
+### Distinct subsequences
+
+```{r warning=FALSE, message = FALSE}
+
+# Distinct subsequences 
+
+geo_dss <- seqdss(geoseq)
+head(geo_dss)
+seqtab(geo_dss, idx=0) # full list of sub-sequences with their frequencies
+
+# number of distinct sub-sequences
+seqtab(geo_dss, idx=0) %>% nrow # 70 unique distinct subsequences 
+print(seqtab(geo_dss))
+
+
+```
+
+# Clustering 
+
+## Vertical Mobility
+
+```{r warning=FALSE, message = FALSE, eval=FALSE}
+
+# Detect Longest common subsequence (LCS)
+
+level_lcs <- seqdist(levseq, method = "LCS", with.missing=TRUE, norm = "auto") # normalize
+level_lcs_sim <- 1 - seqdist(levseq, method = "LCS", with.missing=TRUE, norm = "auto") 
+
+# Clustering using Ward method 
+
+level_lcs_ward <- agnes(level_lcs, diss = TRUE, method = "ward")
+
+```
+
+```{r warning=FALSE, message = FALSE}
+
+par(mfrow = c(1, 1))
+plot(level_lcs_ward, which.plots = 2, main = "Hierarchical sequence clustering from the LCS (Ward method)")
+
+```
+
+
+```{r warning=FALSE, message = FALSE, eval=FALSE}
+
+# Select 10 clusters 
+
+level_lcs_ward10 <- cutree(level_lcs_ward, k = 10)
+
+```
+
+
+```{r warning=FALSE, message = FALSE}
+
+par(mar = c(2, 4, 2, 0.5))
+seqdplot(levseq, group=level_lcs_ward10, border=NA, with.legend = FALSE)
+seqfplot(levseq_return_38, group=level_lcs_ward10, border=NA, with.legend = FALSE)
+
+```
+
+```{r warning=FALSE, message = FALSE, eval=FALSE}
+
+# Consolidation with the "partition around medoids" (PAM) method
+
+library(WeightedCluster)
+
+level_lcs_pam10 <- wcKMedoids(level_lcs, k = 10)
+
+```
+
+
+```{r warning=FALSE, message = FALSE}
+
+par(mar = c(2, 4, 2, 0.5))
+seqdplot(levseq, group=level_lcs_pam10$clustering, border=NA, with.legend = FALSE) # state distribution plot
+seqfplot(levseq_return_38, group=level_lcs_pam10$clustering, border=NA, with.legend = FALSE) # frequency plot
+
+```
+
+```{r warning=FALSE, message = FALSE, eval = FALSE}
+
+# extract and label clusters
+level_cluster <- factor(level_lcs_pam10$clustering)
+level_cluster <- as.data.frame(level_cluster)
+level_cluster <- rownames_to_column(level_cluster, "level_id")
+
+# retrieve ids 
+
+level_ids <- tibble::rownames_to_column(levseq, "DocId")
+level_ids <- tibble::rownames_to_column(level_ids, "level_id")
+level_ids <- level_ids[1:2]
+
+# join with names
+level_ids_name <- left_join(level_ids, names)
+
+level_cluster <- left_join(level_ids, level_cluster)
+
+# label clusters
+
+library(forcats)
+
+level_cluster <- level_cluster %>% mutate(level_cluster_label = fct_collapse(level_cluster,
+                                                                                "High" = c("127", "132", "146", "193", "84"),
+                                                                                "Low" = c("182", "29"), 
+                                                                                "Medium" = c("25", "74", "219")))
+
+
+level_cluster %>% group_by(level_cluster) %>% count(sort = TRUE)
+level_cluster %>% group_by(level_cluster_label) %>% count(sort = TRUE)
+
+
+```
+
+## Horizontal Mobility
+
+```{r warning=FALSE, message = FALSE, eval = FALSE}
+
+# Clustering based on Longest common subsequence (LCS)
+
+sector_lcs <- seqdist(sectseq, method = "LCS", with.missing=TRUE, norm = "auto") # normalize
+sector_lcs_sim <- 1 - seqdist(sectseq, method = "LCS", with.missing=TRUE, norm = "auto") 
+
+# Clustering using Ward method
+
+library(cluster)
+sector_lcs_ward <- agnes(sector_lcs, diss = TRUE, method = "ward")
+
+```
+
+
+```{r warning=FALSE, message = FALSE}
+
+par(mfrow = c(1, 1))
+plot(sector_lcs_ward, which.plots = 2, main = "Hierarchical clustering based on Longest Common Subsequence (LCS), using Ward method")
+
+
+```
+
+
+```{r warning=FALSE, message = FALSE, eval = FALSE}
+
+# select 10 clusters
+
+sector_lcs_ward10 <- cutree(sector_lcs_ward, k = 10)
+
+```
+
+
+```{r warning=FALSE, message = FALSE}
+
+par(mar = c(2, 4, 2, 0.5))
+seqdplot(sectseq, group=sector_lcs_ward10, border=NA, with.legend = FALSE)
+seqfplot(sectseq_return_38, group=sector_lcs_ward10, border=NA)
+
+```
+
+
+```{r warning=FALSE, message = FALSE, eval=FALSE}
+
+# Consolidation with the "partition around medoids" (PAM) method
+
+library(WeightedCluster)
+
+sector_lcs_pam10 <- wcKMedoids(sector_lcs, k = 10)
+
+```
+
+
+```{r warning=FALSE, message = FALSE}
+
+par(mar = c(2, 4, 2, 0.5))
+seqdplot(sectseq, group=sector_lcs_pam10$clustering, border=NA, with.legend = FALSE)
+seqfplot(sectseq_return_38, group=sector_lcs_pam10$clustering, border=NA, with.legend = FALSE)
+
+```
+
+
+```{r warning=FALSE, message = FALSE, eval=FALSE}
+
+# extract and label clusters
+library(tidyverse)
+sector_cluster <- factor(sector_lcs_pam10$clustering)
+sector_cluster <- as.data.frame(sector_cluster)
+sector_cluster <- rownames_to_column(sector_cluster, "sector_id")
+
+sector_cluster %>% group_by(sector_cluster) %>% count(sort = TRUE)
+
+# retrieve ids 
+
+sector_ids <- tibble::rownames_to_column(sectseq, "DocId")
+sector_ids <- tibble::rownames_to_column(sector_ids, "sector_id")
+sector_ids <- sector_ids[1:2]
+
+# join with names 
+
+sector_id_name <- left_join(sector_ids, names)
+
+sector_cluster <- left_join(sector_ids, sector_cluster)
+
+# label clusters
+
+sector_cluster <- sector_cluster %>% mutate(sector_cluster_label = fct_collapse(sector_cluster,
+                                                                        "Railway" = c("146", "262"),
+                                                                        "Education" = c("67", "259", "260"), 
+                                                                        "Official" = c("123", "127", "90"), 
+                                                                        "Private/Other" = c("132", "157")))
+
+sector_cluster %>% group_by(sector_cluster_label) %>% count(sort = TRUE)
+
+```
+
+
+## Geographical Mobility 
+
+```{r warning=FALSE, message = FALSE, eval=FALSE}
+
+# Detect Longest common subsequence (LCS)
+
+geo_lcs <- seqdist(geoseq, method = "LCS", with.missing=TRUE, norm = "auto") # normalize
+geo_lcs_sim <- 1 - seqdist(geoseq, method = "LCS", with.missing=TRUE, norm = "auto") 
+
+# Clustering using Ward method 
+
+geo_lcs_ward <- agnes(geo_lcs, diss = TRUE, method = "ward")
+
+```
+
+
+```{r warning=FALSE, message = FALSE}
+
+par(mfrow = c(1, 1))
+plot(geo_lcs_ward, which.plots = 2, main = "Hierarchical sequence clustering from the LCS (Ward method)")
+
+```
+
+
+```{r warning=FALSE, message = FALSE, eval=FALSE}
+
+# Consolidation using the PAM method
+
+library(WeightedCluster)
+
+geo_lcs_pam10 <- wcKMedoids(geo_lcs, k=10)
+
+```
+
+
+```{r warning=FALSE, message = FALSE}
+
+par(mar = c(2, 4, 2, 0.5))
+seqdplot(geoseq, group=geo_lcs_pam10$clustering, border=NA, with.legend = FALSE)
+seqfplot(geoseq_return_38, group=geo_lcs_pam10$clustering, border=NA, with.legend = FALSE)
+
+```
+
+```{r warning=FALSE, message = FALSE, eval=FALSE}
+
+# extract and label clusters
+geo_cluster <- factor(geo_lcs_pam10$clustering)
+geo_cluster <- as.data.frame(geo_cluster)
+geo_cluster <- rownames_to_column(geo_cluster, "geo_id")
+
+
+# retrieve ids 
+
+geo_ids <- tibble::rownames_to_column(geoseq, "DocId")
+geo_ids <- tibble::rownames_to_column(geo_ids, "geo_id")
+geo_ids <- geo_ids[1:2]
+
+# join with names 
+
+geo_id_name <- left_join(geo_ids, names)
+
+# join with clusters
+
+geo_cluster <- left_join(geo_ids, geo_cluster)
+
+# label clusters
+
+geo_cluster <- geo_cluster %>% mutate(geo_cluster_label = fct_collapse(geo_cluster,
+                                                                             "Metropolitan" = c("146", "259", "67"),
+                                                                             "Shanghai" = c("250"), 
+                                                                             "Jiangnan" = c("1"),
+                                                                             "Guangzhou" = c("188"),
+                                                                       "Other" = c("263"),
+                                                                       "Mobile" = c("29", "148", "260")))
+
+geo_cluster %>% group_by(geo_cluster) %>% count(sort = TRUE)
+geo_cluster %>% group_by(geo_cluster_label) %>% count(sort = TRUE)
+
+```
+
+# Multiple Correspondance Analysis
+
+## Data preparation 
+
+```{r warning=FALSE, message = FALSE}
+
+# join clusters from the three dimensions
+
+sector_cluster$sector_id <- NULL
+level_cluster$level_id  <- NULL
+geo_cluster$geo_id  <- NULL
+
+sector_cluster$sector_cluster <- NULL
+level_cluster$level_cluster  <- NULL
+geo_cluster$geo_cluster  <- NULL
+
+clusters_ids <- left_join(sector_cluster, level_cluster)
+clusters_ids <- left_join(clusters_ids, geo_cluster)
+
+clusters_ids <- clusters_ids %>% rename(sector = sector_cluster_label, level = level_cluster_label, region = geo_cluster_label)
+
+# join with metadata 
+
+meta <- main_data_all %>% select(DocId, Birth_Province_eng_standard, estimated_returned_year, Funding, field2_code)
+
+# regroup/recode variables
+
+meta <- meta  %>%
+  mutate(Discipline = fct_collapse(field2_code,
+                                "Social Sciences" = c("SOC"),
+                                "Humanities" = c("HUM"),
+                                "Multiple" = c("MULTI"),
+                                "Sciences" = c("NAT", "SCI"), 
+                                "Other" = c("MIL", "PROF"), 
+                                "Engineering" = c("ENG")))
+
+
+meta$Discipline <- replace(meta$Discipline, is.na(meta$Discipline), "Other")
+
+
+
+meta <- meta  %>%
+  mutate(Nativeplace = fct_collapse(Birth_Province_eng_standard,
+                                   "Jiangsu" = c("Jiangsu"),
+                                   "Guangdong" = c("Guangdong"),
+                                   "Zhejiang" = c("Zhejiang"),
+                                   "Hebei-Zhili" = c("Hebei", "Zhili"), 
+                                   "Other" = c("Fujian", "Hubei", "Jiangxi", "Anhui", "Sichuan", "Shandong", "Henan", "Hunan", "Gansu", "Guangxi"), 
+                                   "Overseas" = c("Hawaii", "California", "Hongkong", "Malaysia")))
+
+meta$Nativeplace <- replace(meta$Nativeplace, is.na(meta$Nativeplace), "Other")
+
+meta <- meta  %>%
+  mutate(Funding = fct_collapse(Funding,
+                                "Public" = c("Government support", "Partial support"),
+                                "Private" = c("Private support", "Unknown")))
+
+
+meta$Generation <- cut(meta$estimated_returned_year, 
+                breaks = c(0, 1911, 1917),  # Define breakpoints
+                labels = c("PreBoxer", "PostBoxer"),  # Assign labels
+                right = FALSE) 
+
+
+meta$Generation <- replace(meta$Generation, is.na(meta$Generation), "PreBoxer")
+
+names(meta)
+
+meta <- meta %>% select(DocId, Generation, Nativeplace, Funding, Discipline)
+
+names(meta)
+summary(meta)
+
+# join with clusters 
+
+cluster_meta <- left_join(meta, clusters_ids)
+
+# prepare data for mca with and without metadata 
+
+cluster_mca <- column_to_rownames(clusters_ids, "DocId")
+cluster_meta_mca <- column_to_rownames(cluster_meta, "DocId")
+
+```
+
+
+## Multidimensional Mobility
+
+```{r warning=FALSE, message = FALSE}
+
+library(FactoMineR)
+res.MCA1<-MCA(cluster_mca,graph=FALSE)
+plot.MCA(res.MCA1, choix='var',title="MCA Variables Plot",col.var=c(1,2,3))
+plot.MCA(res.MCA1,invisible= 'ind',col.var=c(1,1,1,1,2,2,2,3,3,3,3,3,3),title="MCA Biplot with Variables",label =c('var'))
+plot.MCA(res.MCA1,invisible= 'var', cex = 0.8, title="MCA Biplot with Individuals",label =c('ind'))
+
+```
+
+
+```{r warning=FALSE, message = FALSE}
+
+# Hierarchical Clustering (10 dimensions, 8 clusters)
+
+res.MCA1<-MCA(cluster_mca,ncp=10,graph=FALSE)
+res.HCPC1<-HCPC(res.MCA1,nb.clust=8,consol=FALSE,graph=FALSE)
+plot.HCPC(res.HCPC1,choice='tree',title='Tree')
+plot.HCPC(res.HCPC1,choice='map',draw.tree=FALSE,title='Factor Map')
+plot.HCPC(res.HCPC1,choice='3D.map',ind.names=FALSE,centers.plot=FALSE,angle=60,title='3D-Tree')
+summary(res.HCPC1)
+
+```
+
+## Career and attribute data
+```{r warning=FALSE, message = FALSE}
+
+cluster_meta_mca_na <- cluster_meta_mca %>% drop_na(level) %>% drop_na(sector) %>% drop_na(region) 
+
+res.MCA2<-MCA(cluster_meta_mca_na,graph=FALSE)
+plot.MCA(res.MCA2, choix='var',title="MCA Variables Plot",col.var=c(1,2,3,4,5,6,7))
+plot.MCA(res.MCA2,invisible= 'ind',col.var=c(1,1,2,2,2,2,2,2,3,3,4,4,4,4,4,4,5,5,5,5,6,6,6,7,7,7,7,7,7),title="MCA Biplot with Variables",cex=0.8,cex.main=0.8,cex.axis=0.8,label =c('var'))
+plot.MCA(res.MCA2,invisible= 'var',title="MCA Biplot with Individuals",cex=0.8,cex.main=0.8,cex.axis=0.8,label =c('ind'))
+
+```
+```{r warning=FALSE, message = FALSE}
+
+# Hierarchical clustering with 4 clusters 
+
+res.MCA2<-MCA(cluster_meta_mca_na,ncp=22,graph=FALSE)
+res.HCPC2<-HCPC(res.MCA2,nb.clust=4,consol=FALSE,graph=FALSE)
+plot.HCPC(res.HCPC2,choice='tree',title='Tree')
+plot.HCPC(res.HCPC2,choice='map',draw.tree=FALSE,title='Factor Map')
+plot.HCPC(res.HCPC2,choice='3D.map',ind.names=FALSE,centers.plot=FALSE,angle=60,title='3D-Tree')
+
+```
+
+## Career and affiliation data
+
+See the related scripts for the construction of the supplementary variables and their summary statistics.
+```{r warning=FALSE, message = FALSE}
+
+# prepare supplementary variables
+
+sup_var <- meta_clusters %>% select(DocId, Highest_degree, Exam, 
+                                    Distinction, Scholarship, 
+                                    Work_pre_US, Work_US, 
+                                    edu_china_lvc_Label2, 
+                                    edu_us_lvc_Label2, us_prestige, 
+                                    employ_lvc_cluster_label, 
+                                    Activism, assoc_lvc_Label2)
+
+sup_var
+
+sup_var <- sup_var %>% rename(EduChina = edu_china_lvc_Label2, 
+                              EduUS = edu_us_lvc_Label2,
+                              Employ = employ_lvc_cluster_label, 
+                              Assoc = assoc_lvc_Label2)
+
+sup_var_select <- sup_var %>% select(DocId, Highest_degree, 
+                                     Exam, Distinction, Scholarship, 
+                                     us_prestige, Activism) 
+
+# Join with sequence data
+
+career_cluster_supvar <- left_join(clusters_ids, sup_var)
+
+career_cluster_supvar_select <- career_cluster_supvar %>% select(-c(EduChina, EduUS, Employ, Assoc))
+
+# select relevant variables
+
+career_cluster_supvar_mca <- column_to_rownames(career_cluster_supvar, "DocId")
+career_cluster_supvar_select_mca <- column_to_rownames(career_cluster_supvar_select, "DocId")
+
+```
+
+```{r warning=FALSE, message = FALSE}
+
+res.MCA3<-MCA(career_cluster_supvar_select_mca,graph=FALSE)
+plot.MCA(res.MCA3, choix='var',title="Graphe des variables",col.var=c(1,2,3,4,5,6,7,8,9,10,11))
+plot.MCA(res.MCA3,invisible= 'ind',col.var=c(1,1,1,1,2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,5,5,6,6,7,7,8,8,9,9,10,10,10,11,11,11,11,11),title="Graphe de l'ACM",label =c('var'))
+
+# use explor 
+## library(explor)
+## explor(res.MCA3)
+
+```
+```{r warning=FALSE, message = FALSE}
+
+res.MCA4<-MCA(career_cluster_supvar_mca,graph=FALSE)
+plot.MCA(res.MCA4, choix='var',title="Graphe des variables",col.var=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15))
+plot.MCA(res.MCA4,invisible= 'ind',selectMod= 'cos2 0.1',col.var=c(1,1,1,1,2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,5,5,6,6,7,7,8,8,9,9,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,11,11,11,11,11,11,11,11,11,11,11,11,11,11,12,12,12,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,14,14,14,14,14,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15),title="Graphe de l'ACM",label =c('var'))
+
+# use explor 
+## library(explor)
+## explor(res.MCA4)
+
+```
+
+
+# Sequence metrics
+
+## Compute sequence indices
+
+```{r warning=FALSE, message = FALSE}
+
+# Compute sequence indicators for each dimension/layer 
+
+sector_metrics <- seqindic(sectseq, indic="all", with.missing=F)
+
+level_metrics <- seqindic(levseq, indic="all", with.missing=F)
+
+geo_metrics <- seqindic(geoseq, indic="all", with.missing=F)
+
+# selected metrics (only normalized metrics)
+
+sector_metrics_selected <- sector_metrics %>% select(Visitp, Transp, Entr, MeanD2, Dustd2, Volat, Cplx, Turb2n)
+level_metrics_selected <- level_metrics %>% select(Visitp, Transp, Entr, MeanD2, Dustd2, Volat, Cplx, Turb2n)
+geo_metrics_selected <- geo_metrics %>% select(Visitp, Transp, Entr, MeanD2, Dustd2, Volat, Cplx, Turb2n)
+
+colnames(sector_metrics_selected) <- paste0("sector.", colnames(sector_metrics_selected))
+colnames(level_metrics_selected) <- paste0("level.", colnames(level_metrics_selected))
+colnames(geo_metrics_selected) <- paste0("geo.", colnames(geo_metrics_selected))
+
+sector_metrics_selected <- tibble::rownames_to_column(sector_metrics_selected, "DocId")
+level_metrics_selected <- tibble::rownames_to_column(level_metrics_selected, "DocId")
+geo_metrics_selected <- tibble::rownames_to_column(geo_metrics_selected, "DocId")
+
+# bind columns
+
+metrics_all <- left_join(sector_metrics_selected, level_metrics_selected)
+metrics_all <- left_join(metrics_all, geo_metrics_selected)
+
+# Add quality metrics for levels (vertical mobility) 
+
+bad <- seqibad(levseq, with.missing=TRUE, state.order=c('L6','L5','L4','L3', 'L2', 'L1'), state.equiv=list(c('L0')))
+bad <- as.data.frame(bad)
+
+degrad <- seqidegrad(levseq, with.missing=TRUE, state.order=c('L6','L5','L4','L3', 'L2', 'L1'), state.equiv=list(c('L0')))
+degrad <- as.data.frame(degrad)
+
+insec <- seqinsecurity(levseq, with.missing=TRUE, state.order=c('L6','L5','L4','L3', 'L2', 'L1'), state.equiv=list(c('L0')))
+insec <- as.data.frame(insec)
+
+prec <- seqprecarity(levseq, with.missing=TRUE, state.order=c('L6','L5','L4','L3', 'L2', 'L1'), state.equiv=list(c('L0')))
+prec <- as.data.frame(prec)
+
+# focus on degradation 
+
+degrad <- tibble::rownames_to_column(degrad, "DocId")
+
+# join with other metrics
+
+metrics_all <- left_join(metrics_all, degrad)
+
+```
+
+```{r warning=FALSE, message = FALSE}
+
+metrics_all
+
+```
+
+## PCA on sequence metrics
+
+```{r warning=FALSE, message = FALSE}
+
+metrics_pca <- column_to_rownames(metrics_all, "DocId")
+
+library(FactoMineR)
+
+res.PCA3<-PCA(metrics_pca,graph=FALSE)
+plot.PCA(res.PCA3,choix='var',title="Principal Component Analysis Variables")
+plot.PCA(res.PCA3,title="Principal Component Analysis: Individuals")
+
+res.PCA3<-PCA(metrics_pca,ncp=14,graph=FALSE)
+res.HCPC3<-HCPC(res.PCA3,nb.clust=3,consol=FALSE,graph=FALSE)
+plot.HCPC(res.HCPC3,choice='tree',title='Tree Map')
+plot.HCPC(res.HCPC3,choice='map',draw.tree=FALSE,title='Factor Map')
+plot.HCPC(res.HCPC3,choice='3D.map',ind.names=FALSE,centers.plot=FALSE,angle=60,title='3D Tree Map')
+
+```
+```{r warning=FALSE, message = FALSE}
+
+summary(res.HCPC3)
+
+# extract clusters 
+
+pca_clusters <- res.HCPC3$data.clust
+pca_clusters <- rownames_to_column(pca_clusters, "DocId")
+pca_clusters <- pca_clusters %>% select(DocId, clust) %>% mutate(mobility = fct_recode(clust, 
+                                                                                              "Upward" = "3",
+                                                                                              "CrossSector" = "2",
+                                                                                              "Moderate" = "1"))
+
+pca_clusters$clust <- NULL
+
+pca_clusters
+
+
+```
+```{r warning=FALSE, message = FALSE}
+
+# join metrics clusters with main data 
+
+career_cluster <- left_join(cluster_meta, pca_clusters)
+
+# extract parangons and specific individuals
+res.HCPC3$desc.ind$para
+res.HCPC3$desc.ind$dist
+
+```
+```{r}
+
+# join with main data (meta) to use as supplementary variables, to check generational effect or other factors
+
+metrics_meta <- inner_join(meta, metrics_all)
+metrics_meta_pca <- column_to_rownames(metrics_meta, "DocId")
+
+metrics_biodata <- data.frame(metrics_meta_pca,Generation_Funding=paste0(metrics_meta_pca[,'Generation'],metrics_meta_pca[,'Funding']))
+res.PCA4<-PCA(metrics_biodata,ncp=17,quali.sup=c(1,2,3,4,30),graph=FALSE)
+plot.PCA(res.PCA4,choix='var',title="Principal Component Analysis Variables")
+plot.PCA(res.PCA4,invisible=c('ind','ind.sup'),habillage=1,title="Principal Component Analysis: Individuals",cex=0.75,cex.main=0.75,cex.axis=0.75,label =c('quali'))
+
+```
+

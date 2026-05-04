@@ -1,0 +1,448 @@
+---
+title: "Network Analysis of U.S. Returned Students' Associative Network (1917)"
+author: "Cécile Armand"
+date: "`r lubridate::today()`"
+tags: [who's who directory, biography, bilingual, network analysis, affiliation network, structural equivalence]  
+abstract: |
+  This study employs formal network analysis, implemented through the *igraph* R package, to examine US-educated Chinese membership in associations, based on data from the *Who’s Who of American Returned Students* (Tsinghua, 1917).  
+  
+  <style>
+    body {
+    text-align: justify}
+  </style>
+    
+output: 
+  html_document:
+    toc: true
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    toc_depth: 3
+    number_sections: false
+    code_folding: show # hide
+    fig_caption: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(igraph)
+load(file = "assoc_networks.RData")
+
+```
+
+
+```{r warning = FALSE, message = FALSE}
+
+# load required libraries 
+
+library(tidyverse)
+library(igraph)
+
+```
+
+# Data preparation 
+
+```{r warning = FALSE, message = FALSE, eval = FALSE}
+
+# load affiliation data
+
+affiliation <- read_csv("Data/input/affiliation_eng.csv") # 3431 institutional affiliations
+
+# filter associative affiliations
+
+assoc <- affiliation %>% filter(category_main == "association") # 585 affiliations, distributed across 229 individuals (from 1 to 14 affiliation(s) each)
+
+```
+
+```{r warning = FALSE, message = FALSE}
+
+# append biographical data (esp. returned cohorts) to the affiliation data 
+
+assoc_meta <- inner_join(meta_all, assoc)
+
+```
+
+```{r warning = FALSE, message = FALSE}
+
+# basic stats (distribution by institution)
+
+assoc_meta %>% distinct(DocId, Institution) %>% 
+  group_by(Institution) %>% 
+  count(sort = TRUE)
+
+```
+
+# Create the affiliation network
+
+```{r warning = FALSE, message = FALSE}
+
+## create edge list
+
+assoc_edge <- assoc %>% mutate(Student = paste(DocId, name, sep = "_")) %>% select(Student, Institution)
+
+## create node list 
+
+assoc_node_student <- assoc_edge %>% distinct(Student) %>% rename(Name = Student) %>% mutate(Type = "Student")
+assoc_node_assoc <- assoc_edge %>% distinct(Institution) %>% rename(Name = Institution) %>% mutate(Type = "Association")
+assoc_node <- bind_rows(assoc_node_student, assoc_node_assoc)
+
+assoc_node %>% group_by(Type) %>% count() # 229 students and 254 associations 
+
+# export edge list, node list and node attributes as csv files (optional)
+# write.csv(assoc_edge, "assoc_edge.csv")
+# write.csv(assoc_node, "assoc_node.csv")
+# write.csv(student_attribute, "student_attribute.csv")
+
+```
+
+```{r warning = FALSE, message = FALSE}
+# Create the network 
+
+library(igraph)
+assoc_net <- graph_from_data_frame(assoc_edge, directed = FALSE, vertices = assoc_node) # 483 nodes, 585 edges
+
+assoc_net
+
+```
+```{r warning = FALSE, message = FALSE}
+# the associative network contains 39 components, from 2 to 379 nodes
+
+# component(assoc_net)
+
+```
+
+# Visualize the network
+
+```{r warning = FALSE, message = FALSE}
+
+###  index node size on degree centrality 
+
+assoc_deg_norm <- degree(assoc_net, mode = "all", normalized = TRUE)
+V(assoc_net)$size <- assoc_deg_norm * 100 
+
+###  index node color on their type
+
+V(assoc_net)$color <- ifelse(V(assoc_net)$Type == "Association", "red", "orange")
+
+plot(assoc_net, 
+     vertex.size = V(assoc_net)$size,
+     vertex.color = V(assoc_net)$color,
+     vertex.label.color = "black",
+     vertex.label.cex = V(assoc_net)$size/10,
+     main = "Associative Network")
+
+```
+
+# Community detection 
+
+```{r warning = FALSE, message = FALSE}
+
+set.seed(2025)
+assoc_cluster <- cluster_louvain(assoc_net)
+
+### 54 communities were found, including from 2 to 51 members
+
+sizes(assoc_cluster)
+
+##  Extract community membership 
+
+assoc_cluster_df <- data.frame(assoc_cluster$membership,
+                                     assoc_cluster$names) %>% 
+  group_by(assoc_cluster.membership) %>% 
+  add_tally() %>% # add size of clusters
+  rename(LVC_Member = assoc_cluster.names, LVC_Cluster = assoc_cluster.membership, LVC_Size = n)
+
+## add node type and university degree (student count)
+
+assoc_node_type <- assoc_node %>% rename(LVC_Member = Name)
+assoc_cluster_df <- left_join(assoc_cluster_df, assoc_node_type)
+
+assoc_degree <- degree(assoc_net, mode = "all", normalized = FALSE)
+assoc_degree_df <- as.data.frame(assoc_degree)
+assoc_degree_df <- rownames_to_column(assoc_degree_df, "LVC_Member")
+
+assoc_cluster_df <- left_join(assoc_cluster_df, assoc_degree_df) 
+
+assoc_cluster_df
+
+```
+
+# Time-based network analysis
+
+## Create cohorts
+
+```{r warning = FALSE, message = FALSE}
+
+# create the cohorts 
+
+names <- main_data_all %>% select(DocId, name_source)
+meta_all <- left_join(meta_all, names)
+
+cohort1 <- meta_all %>% 
+  filter(returned_period == "Pioneer") %>% 
+  mutate(Student = paste(DocId, name_source, sep = "_")) %>% 
+  select(Student) # before the nationwide federation of the CSA # 29 
+
+cohort2 <- meta_all %>% 
+  filter(returned_period == "PostExam") %>% 
+  mutate(Student = paste(DocId, name_source, sep = "_")) %>% 
+  select(Student) # after the federation of CSA and before the creation of the CSCA (112)
+
+cohort3 <- meta_all %>% 
+  filter(returned_period == "PostRevolution") %>% 
+  mutate(Student = paste(DocId, name_source, sep = "_")) %>% 
+  select(Student) # after the revolution and the creation of the CSCA # 260
+
+
+# create time-based edge lists and node lists 
+
+assoc_edge1 <- assoc_edge %>% filter(Student %in% cohort1$Student)
+assoc_node_student1 <- assoc_edge1 %>% distinct(Student) %>% rename(Name = Student) %>% mutate(Type = "Student")
+assoc_node_assoc1 <- assoc_edge1 %>% distinct(Institution) %>% rename(Name = Institution) %>% mutate(Type = "Association")
+assoc_node1 <- bind_rows(assoc_node_student1, assoc_node_assoc1)
+
+assoc_edge2 <- assoc_edge %>% filter(Student %in% cohort2$Student)
+assoc_node_student2 <- assoc_edge2 %>% distinct(Student) %>% rename(Name = Student) %>% mutate(Type = "Student")
+assoc_node_assoc2 <- assoc_edge2 %>% distinct(Institution) %>% rename(Name = Institution) %>% mutate(Type = "Association")
+assoc_node2 <- bind_rows(assoc_node_student2, assoc_node_assoc2)
+
+assoc_edge3 <- assoc_edge %>% filter(Student %in% cohort3$Student)
+assoc_node_student3 <- assoc_edge3 %>% distinct(Student) %>% rename(Name = Student) %>% mutate(Type = "Student")
+assoc_node_assoc3 <- assoc_edge3 %>% distinct(Institution) %>% rename(Name = Institution) %>% mutate(Type = "Association")
+assoc_node3 <- bind_rows(assoc_node_student3, assoc_node_assoc3)
+
+```
+
+## Place detection
+
+```{r warning = FALSE, message = FALSE, eval = FALSE}
+
+install.packages("http://lereps.sciencespo-toulouse.fr/IMG/gz/places_0.2.3.tar.gz", repos = NULL, type = "source")
+library(Places)
+
+# cohort 1 
+
+assoc_edge1 <- as.data.frame(assoc_edge1)
+assoc_place_1 <- places(assoc_edge1, "Student", "Institution")  # 14 associative places identified
+assoc_place_1_df <- as.data.frame(assoc_place_1$PlacesData) 
+
+# 14 elements and 28 sets -> 25 places identified
+
+# cohort 2 
+
+assoc_edge2 <- as.data.frame(assoc_edge2)
+assoc_place_2 <- places(assoc_edge2, "Student", "Institution")  # 48 associative places identified
+assoc_place_2_df <- as.data.frame(assoc_place_2$PlacesData) 
+
+# 51 elements and 82 sets -> 48 places identified
+
+# cohort 3
+
+assoc_edge3 <- as.data.frame(assoc_edge3)
+assoc_place_3 <- places(assoc_edge3, "Student", "Institution")  # 142 associative places identified
+assoc_place_3_df <- as.data.frame(assoc_place_3$PlacesData) 
+
+# 164 elements and 184 sets -> 142 places identified 
+
+# Most significant places
+assoc_place_1_df %>% filter(NbElements >1 & NbSets>1)
+assoc_place_2_df %>% filter(NbElements >1 & NbSets>1)
+assoc_place_3_df %>% filter(NbElements >1 & NbSets>1)
+
+```
+
+## Strong ties
+
+```{r warning = FALSE, message = FALSE, eval = FALSE}
+
+### Network of Places linked by associations
+
+table(E(places_net1)$weight)
+E(places_net1)[weight > 1] 
+
+table(E(places_net2)$weight)
+E(places_net2)[weight > 1] 
+
+table(E(places_net2)$weight)
+E(places_net2)[weight > 1] 
+
+### Network of Associations linked by places
+
+table(E(assoc_net1)$weight)
+table(E(assoc_net2)$weight)
+table(E(assoc_net3)$weight)
+
+E(assoc_net1)[weight > 1]
+E(assoc_net2)[weight > 1]
+E(assoc_net3)[weight > 2]
+
+```
+
+
+## Dual networks of places
+
+### Before 1905
+```{r warning = FALSE, message = FALSE}
+
+# Create a network from the list of Places
+
+assoc_places_net1 <- graph_from_data_frame(assoc_place_1$Edgelist, directed = FALSE)
+
+## Transformation into a 2-mode network
+V(assoc_places_net1)$type <- bipartite_mapping(assoc_places_net1)$type
+
+# Projection
+
+assoc_places_net1_proj <- bipartite_projection(assoc_places_net1, multiplicity = TRUE)
+places_net1 <- assoc_places_net1_proj$proj1  # Network of elements/places
+assoc_net1 <- assoc_places_net1_proj$proj2  # Network of sets (associations)
+
+# Visualize networks of associations linked by places
+
+plot(assoc_net1, vertex.size = 7, 
+     vertex.color = "red", 
+     vertex.label.color = "black", 
+     vertex.label.cex = 0.5, 
+     main="Associative Network before 1905")
+
+```
+
+### 1905-1911
+```{r warning = FALSE, message = FALSE}
+
+# Create a network from the list of Places
+
+assoc_places_net2 <- graph_from_data_frame(assoc_place_2$Edgelist, directed = FALSE)
+
+## Transformation into a 2-mode network
+V(assoc_places_net2)$type <- bipartite_mapping(assoc_places_net2)$type
+
+# Projection
+
+assoc_places_net2_proj <- bipartite_projection(assoc_places_net2, multiplicity = TRUE)
+places_net2 <- assoc_places_net2_proj$proj1  # Network of elements/places
+assoc_net2 <- assoc_places_net2_proj$proj2  # Network of sets (associations)
+
+# Visualization 
+
+plot(assoc_net2, vertex.size = 7, 
+     vertex.color = "red", 
+     vertex.label.color = "black", 
+     vertex.label.cex = 0.5, 
+     main="Associative Network, 1905-1911")
+
+
+```
+
+### 1912-1917
+```{r warning = FALSE, message = FALSE}
+
+# Create a network from the list of Places
+
+assoc_places_net3 <- graph_from_data_frame(assoc_place_3$Edgelist, directed = FALSE)
+
+## Transformation into a 2-mode network
+V(assoc_places_net3)$type <- bipartite_mapping(assoc_places_net3)$type
+
+# Projection
+
+assoc_places_net3_proj <- bipartite_projection(assoc_places_net3, multiplicity = TRUE)
+places_net3 <- assoc_places_net3_proj$proj1  # Network of elements/places
+assoc_net3 <- assoc_places_net3_proj$proj2  # Network of sets (associations)
+
+# Visualize networks of associations linked by places
+
+plot(assoc_net3, vertex.size = 5, 
+     vertex.color = "red", 
+     vertex.label.color = "black", 
+     vertex.label.cex = 0.5, 
+     main="Associative Network 1912-1917")
+
+```
+
+### Export 
+```{r warning = FALSE, message = FALSE, eval = FALSE}
+
+# Convert igraph objects into edge lists (optional)
+assoc_net1_edge <- as_edgelist(assoc_net1)
+assoc_net2_edge <- as_edgelist(assoc_net2)
+assoc_net3_edge <- as_edgelist(assoc_net3)
+
+# weighted networks
+assoc_net1_edge <- data.frame(
+  from = ends(assoc_net1, E(assoc_net1))[,1],
+  to   = ends(assoc_net1, E(assoc_net1))[,2],
+  weight = E(assoc_net1)$weight
+)
+
+
+assoc_net2_edge <- data.frame(
+  from = ends(assoc_net2, E(assoc_net2))[,1],
+  to   = ends(assoc_net2, E(assoc_net2))[,2],
+  weight = E(assoc_net2)$weight
+)
+
+assoc_net3_edge <- data.frame(
+  from = ends(assoc_net3, E(assoc_net3))[,1],
+  to   = ends(assoc_net3, E(assoc_net3))[,2],
+  weight = E(assoc_net3)$weight
+)
+
+# Export edge lists and node lists as csv files (optional)
+write.csv(assoc_net1_edge, "~/assoc_net1_edge.csv")
+write.csv(assoc_net2_edge, "~/assoc_net2_edge.csv")
+write.csv(assoc_net3_edge, "~/assoc_net3_edge.csv")
+
+
+```
+
+## Community detection
+```{r warning = FALSE, message = FALSE, eval=FALSE}
+
+set.seed(2026)
+lvc1 <- cluster_louvain(assoc_net1)
+lvc2 <- cluster_louvain(assoc_net2)
+lvc3 <- cluster_louvain(assoc_net3)
+
+```
+
+
+```{r warning = FALSE, message = FALSE}
+
+# Visualize Clustered Networks
+
+V(assoc_net1)$group <- lvc1$membership  # create a group for each community
+V(assoc_net1)$color <- lvc1$membership # node color reflects group membership 
+
+plot(lvc1, assoc_net1, 
+     vertex.label.color = "black", 
+     vertex.label.cex = 0.5, 
+     vertex.size=3,
+     main="Associative Network Before 1905", 
+     sub = "Clustering Using Louvain Algorithm")
+
+V(assoc_net2)$group <- lvc2$membership  # create a group for each community
+V(assoc_net2)$color <- lvc2$membership # node color reflects group membership 
+
+plot(lvc2, assoc_net2,
+     vertex.label.color = "black", 
+     vertex.label.cex = 0.5, 
+     vertex.size=3,
+     main="Associative Network, 1905-1911", 
+     sub = "Clustering Using Louvain Algorithm")
+
+V(assoc_net3)$group <- lvc3$membership  # create a group for each community
+V(assoc_net3)$color <- lvc3$membership # node color reflects group membership 
+
+plot(lvc3, assoc_net3, 
+     vertex.label.color = "black", 
+     vertex.label.cex = 0.5, 
+     vertex.size=3,
+     main="Associative Network, 1912-1917", 
+     sub = "Clustering Using Louvain Algorithm")
+
+```
+
+

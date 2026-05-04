@@ -1,0 +1,518 @@
+---
+title: "Career Beginnings of U.S. Returned Students (1917)"
+author: "Cécile Armand"
+date: "`r lubridate::today()`"
+abstract: |
+   This document analyzes the career beginnings of US-educated Chinese using data from the *Who's Who of American returned students* (Tsing Hua, 1917). 
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(FactoMineR)
+library(Factoshiny)
+library(networkD3)
+```
+
+
+```{r echo = FALSE}
+load("~/Ladder/start.RData")
+
+```
+
+```{r message = FALSE, warning = FALSE}
+# Load required packages
+
+library(tidyverse)
+library(FactoMineR)
+library(Factoshiny)
+```
+
+# Data preparation
+
+## Positions
+```{r message = FALSE, warning = FALSE, eval = FALSE}
+
+# Load dataset of positions after return
+
+head(career_post)
+
+
+```
+
+```{r message = FALSE, warning = FALSE}
+
+
+# Select first position held by individuals 
+career_start <- career_post %>% filter(step == "1") # 358 first positions
+
+head(career_start)
+
+```
+
+## Supplementary data
+```{r message = FALSE, warning = FALSE}
+
+# birth/attributes
+head(main_data_all)
+
+# Education in China (366 curricula)
+
+head(edu_china) 
+
+# Education in USA (810 curricula)
+
+head(edu_us) 
+
+# Work experience in China (PRE-US) (151 positions)
+
+head(position_eng_pre_us) 
+
+# Work experience in the US (134 positions)
+
+head(position_eng_us) 
+
+```
+# Basic Analysis 
+
+## Position level
+```{r message = FALSE, warning = FALSE}
+
+career_start %>% group_by(level) %>% count() %>% 
+  mutate(percent = round(n/358*100, 2)) %>% 
+  arrange(desc(n))
+
+
+```
+## Sector of employment
+```{r message = FALSE, warning = FALSE}
+
+career_start %>% group_by(sector_code) %>%count() %>% 
+  mutate(percent = round(n/358*100, 2)) %>% 
+  arrange(desc(n))
+
+```
+## Place of employment 
+```{r message = FALSE, warning = FALSE}
+
+career_start %>% group_by(area) %>% count() %>% 
+  mutate(percent = round(n/358*100, 2)) %>% 
+  arrange(desc(n))
+
+```
+
+# Multivariate analysis
+
+In this section, we examine how the level, sector, and location of first positions vary according to generation, place of birth, source of funding, and discipline of specialization. We proceed in three steps: (1) selecting the relevant variables; (2) recoding them, if necessary; and (3) merging these variables with the data on first positions.
+
+```{r message = FALSE, warning = FALSE, eval = FALSE}
+
+# Select relevant data (birth place, return year, source of funding, discipline)
+meta_all <- main_data_all %>% select(DocId, Birth_Province_eng_standard, estimated_returned_year, Funding, field2_code)
+
+# Recode disciplines
+meta_all <-  main_data_all %>%
+  mutate(Discipline = fct_collapse(field2_code,
+                                   "Social Sciences" = c("SOC"),
+                                   "Humanities" = c("HUM"),
+                                   "Multiple" = c("MULTI"),
+                                   "Sciences" = c("NAT", "SCI"), 
+                                   "Other" = c("MIL", "PROF"), 
+                                   "Engineering" = c("ENG")))
+
+meta_all$Discipline <- replace(meta_all$Discipline, is.na(meta_all$Discipline), "Other")
+
+# Recode places of birth
+
+meta_all <- meta_all  %>%
+  mutate(Nativeplace = fct_collapse(Birth_Province_eng_standard,
+                                    "Jiangsu" = c("Jiangsu"),
+                                    "Guangdong" = c("Guangdong"),
+                                    "Zhejiang" = c("Zhejiang"),
+                                    "Hebei-Zhili" = c("Hebei", "Zhili"), 
+                                    "Fujian" = c("Fujian"),
+                                    "Hubei" = c("Hubei"),
+                                    "Jiangxi" = c("Jiangxi"),
+                                    "Other" = c("Anhui", "Sichuan", "Shandong", "Henan", "Hunan", "Gansu", "Guangxi", "Guizhou"), 
+                                    "Overseas" = c("Hawaii", "California", "Hongkong", "Malaysia", "New York")))
+
+meta_all$Nativeplace <- replace(meta_all$Nativeplace, is.na(meta_all$Nativeplace), "Other")
+
+# Recode generational cohorts 
+
+## Periodization 1 : Pre/Post Boxer
+meta_all$Generation <- cut(meta_all$estimated_returned_year, 
+                       breaks = c(0, 1911, 1917),  # Define breakpoints
+                       labels = c("PreBoxer", "PostBoxer"),  # Assign labels
+                       right = FALSE) 
+
+
+meta_all$Generation <- replace(meta_all$Generation, is.na(meta_all$Generation), "PreBoxer")
+
+## Pre/Post Examination/Revolution
+meta_all$returned_period <- cut(meta_all$estimated_returned_year, 
+                       breaks = c(0, 1906, 1912, 1917),  # Define breakpoints
+                       labels = c("Pionneer", "PostExam", "PostRevolution"),  # Assign labels
+                       right = FALSE) 
+
+meta_all$returned_period <- replace(meta_all$returned_period, is.na(meta_all$returned_period), "PostExam")
+
+meta_all %>% group_by(returned_period) %>% count(sort = TRUE)
+
+
+```
+
+<div class="alert alert-success" role="alert"> 
+Comment on the periodization method. To categorize the student population by generation and cohort based on their year of return, we employ two distinct periodizations. The first is based on Sino–U.S. relations and funding policies, particularly the U.S. remission of the Boxer Indemnity in 1908. We assume that recipients of Boxer Indemnity scholarships returned during the early Republican period, on the premise that their studies required a minimum duration of three years. The second periodization focuses on China’s internal political context, including the reform of the elite selection system marked by the abolition of the imperial examination in 1905, as well as the Xinhai Revolution and the founding of the Republic in 1912.</div> 
+
+```{r message = FALSE, warning = FALSE}
+
+meta_all %>% group_by(Nativeplace) %>% count(sort = TRUE)
+meta_all %>% group_by(Discipline) %>% count(sort = TRUE)
+meta_all %>% group_by(Generation) %>% count(sort = TRUE)
+meta_all %>% group_by(returned_period) %>% count(sort = TRUE)
+
+```
+
+```{r message = FALSE, warning = FALSE, eval = FALSE}
+# select recoded data 
+
+meta_all <- meta_all %>% select(DocId, Generation, returned_period, Nativeplace, Funding, Discipline)
+
+# join with career data 
+
+career_start_meta <- inner_join(meta_all, career_start)
+```
+
+## Level 
+
+```{r message = FALSE, warning = FALSE}
+
+start_level_cohort_count <- career_start_meta %>% group_by(returned_period, level_code) %>% count()
+start_level_cohort_count <- start_level_cohort_count %>% rename(nlevel = n) 
+start_level_cohort_count <- left_join(start_level_cohort_count, period_count) 
+start_level_cohort_count <- start_level_cohort_count %>% mutate(percent = round(nlevel/n*100, 0)) 
+
+```
+
+
+```{r message = FALSE, warning = FALSE}
+
+ggplot(start_level_cohort_count, aes(fill=level_code, y=percent, x=returned_period)) + 
+  geom_bar(position="dodge", stat="identity")
+
+```
+
+
+```{r}
+```
+
+## Sector over time 
+
+```{r message = FALSE, warning = FALSE, eval = FALSE}
+# Sector by period
+start_sector_cohort_count <- career_start_meta %>% group_by(returned_period, sector_code) %>% count()
+start_sector_cohort_count <- start_sector_cohort_count %>% rename(nsector = n) 
+start_sector_cohort_count <- left_join(start_sector_cohort_count, period_count) 
+start_sector_cohort_count <- start_sector_cohort_count %>% mutate(percent = round(nsector/n*100, 0)) %>% drop_na(returned_period)
+
+```
+
+```{r message = FALSE, warning = FALSE}
+
+ggplot(start_sector_cohort_count, aes(fill=sector_code, y=percent, x=returned_period)) + 
+  geom_bar(position="dodge", stat="identity")
+
+ggplot(start_sector_cohort_count, aes(fill=sector_code, y=percent, x=returned_period)) + 
+  geom_bar(stat="identity") + 
+  labs(title = "Employment Sector Across Cohorts",
+       subtitle = "First Position Upon return", 
+       x = "Returned Period")
+
+```
+
+
+```{r message = FALSE, warning = FALSE, eval = FALSE}
+
+# Occupations by period
+start_occup_cohort_count <- career_start_meta %>% group_by(returned_period, level) %>% count()
+start_occup_cohort_count <- start_occup_cohort_count %>% rename(nlevel = n) 
+start_occup_cohort_count <- left_join(start_occup_cohort_count, period_count) 
+start_occup_cohort_count <- start_occup_cohort_count %>% mutate(percent = round(nlevel/n*100, 0)) 
+
+```
+
+```{r message = FALSE, warning = FALSE}
+
+ggplot(start_occup_cohort_count, aes(fill=level, y=percent, x=returned_period)) + 
+  geom_bar(stat="identity") + 
+  labs(title = "Position Level Across Cohorts",
+       subtitle = "First Position Upon return", 
+       x = "Returned Period")
+
+```
+## Workplace  
+
+```{r message = FALSE, warning = FALSE, eval = FALSE}
+start_geo_cohort_count <- career_start_meta %>% group_by(returned_period, area) %>% count()
+start_geo_cohort_count <- start_geo_cohort_count %>% rename(ngeo = n) 
+start_geo_cohort_count <- left_join(start_geo_cohort_count, period_count) 
+start_geo_cohort_count <- start_geo_cohort_count %>% mutate(percent = round(ngeo/n*100, 0)) 
+
+```
+
+
+```{r message = FALSE, warning = FALSE}
+
+ggplot(start_geo_cohort_count, aes(fill=area, y=percent, x=returned_period)) + 
+  geom_bar(stat="identity") + 
+  labs(title = "Employment Location Across Cohorts",
+       subtitle = "First Position Upon return", 
+       x = "Returned Period")
+
+
+```
+
+# Time elapsed 
+
+In this section, we analyze how the time elapsed between the year of return and the first position varies across cohorts, depending on the return period.
+```{r message = FALSE, warning = FALSE, eval = FALSE}
+
+# Plot time elapsed by return period 
+
+start_year <- career_start_meta %>% select(DocId, year)
+return_year <- main_data_all %>% select(DocId, estimated_returned_year)
+return_start <- inner_join(return_year, start_year)
+
+return_start <- return_start %>% mutate(gap = year-estimated_returned_year)
+return_start <- return_start %>% na.omit()
+
+```
+
+
+```{r message = FALSE, warning = FALSE}
+
+ggplot(return_start, aes(x=estimated_returned_year, y=gap) ) +
+  geom_hex(bins = 35) +
+  scale_fill_continuous(type = "viridis") +
+  theme_bw() + 
+  labs(title = "Transition between return and first employment",
+       x = "Year of return", 
+       y = "Time Elapsed (years)", 
+       caption = "Based on 'Who's Who of American Returned Students' (1917)")
+
+
+library(hrbrthemes)
+
+ggplot(return_start, aes(x=estimated_returned_year, y=gap)) +
+  geom_jitter(alpha = 0.6) +
+  geom_smooth(method=lm , color="red", fill="#69b3a2", se=TRUE) +
+  theme_ipsum()+ 
+  labs(
+    title = "Transition between return and first employment",
+    x = "Year of return", 
+    y = "Time Elapsed (years)", 
+    caption = "Based on 'Who's Who of American Returned Students' (1917)"
+  ) 
+
+```
+
+
+```{r}
+```
+
+
+# Trajectory analysis
+
+## Did they return to their place of birth? 
+
+### Province 
+```{r message = FALSE, warning = FALSE, eval = FALSE}
+
+# we observe at two levels (1) province (2) city
+
+province_start <- career_start %>% select(DocId, province) %>% rename(target = province)
+province_birth <- main_data_all %>% select(DocId, Birth_Province_eng_standard) %>% rename(source = Birth_Province_eng_standard)
+province_match <- inner_join(province_birth, province_start)
+
+# compute weight 
+link1 <- province_match %>% 
+  select(source, target) %>%
+  group_by(source, target) %>% 
+  count() %>% 
+  rename(value = "n") %>% drop_na(target)
+
+link1$same <-ifelse(link1$source==link1$target,"TRUE","FALSE")
+
+link12 <-link1 %>% filter(value>1)
+
+node12 <- data.frame(
+  name=c(as.character(link12$source), 
+         as.character(link12$target)) %>% unique()
+)
+
+# create unique id for each connection
+link12$IDsource <- match(link12$source, node12$name)-1 
+link12$IDtarget <- match(link12$target, node12$name)-1
+
+
+```
+
+```{r message = FALSE, warning = FALSE}
+
+# Visualize 
+library(networkD3)
+
+p1 <- sankeyNetwork(Links = link12, Nodes = node12,
+                    Source = "IDsource", Target = "IDtarget",
+                    Value = "value", NodeID = "name", 
+                    sinksRight=FALSE)
+p1
+
+```
+
+
+```{r message = FALSE, warning = FALSE}
+
+# compare to total births
+
+province_count <- province_match %>% group_by(source) %>% count()
+
+link1 <- left_join(link1, province_count) 
+link1 <- link1 %>% mutate(percent = round(value/n*100, 2))
+
+# Detailed list of return loops
+
+link1 %>% filter(same == "TRUE") %>% arrange(desc(value))
+link1 %>% filter(same == "TRUE") %>% arrange(desc(percent))
+link1 %>% filter(same == "TRUE") %>% arrange(percent)
+
+```
+### Town/City
+
+```{r message = FALSE, warning = FALSE, eval = FALSE}
+
+city_start <- career_start %>% select(DocId, city) %>% rename(target = city)
+city_birth <- main_data_all %>% select(DocId, Birth_Location_eng_standard) %>% rename(source = Birth_Location_eng_standard)
+city_match <- inner_join(city_birth, city_start)
+
+# compute weight 
+link2 <- city_match %>% 
+  select(source, target) %>%
+  group_by(source, target) %>% 
+  count() %>% 
+  rename(value = "n") %>% drop_na(target)
+
+link2$same <-ifelse(link2$source==link2$target,"TRUE","FALSE")
+
+link22 <-link2 %>% filter(value>1)
+
+node22 <- data.frame(
+  name=c(as.character(link22$source), 
+         as.character(link22$target)) %>% unique()
+)
+
+# create unique id for each connection
+link22$IDsource <- match(link22$source, node22$name)-1 
+link22$IDtarget <- match(link22$target, node22$name)-1
+
+
+```
+
+```{r message = FALSE, warning = FALSE}
+
+library(networkD3)
+
+p2 <- sankeyNetwork(Links = link22, Nodes = node22,
+                    Source = "IDsource", Target = "IDtarget",
+                    Value = "value", NodeID = "name", 
+                    sinksRight=FALSE)
+p2
+
+
+```
+
+```{r message = FALSE, warning = FALSE}
+# compare to total births
+city_count <- city_match %>% group_by(source) %>% count()
+
+link2 <- left_join(link2, city_count) 
+link2 <- link2 %>% mutate(percent = round(value/n*100, 2))
+
+# Detailed list of return loops
+
+link2 %>% filter(same == "TRUE") %>% arrange(desc(value))
+link2 %>% filter(same == "TRUE") %>% arrange(desc(percent))
+link2 %>% filter(same == "TRUE") %>% arrange(percent)
+```
+
+
+## Did they return to teach where they were educated? 
+
+```{r message = FALSE, warning = FALSE}
+
+# Select relevant data
+
+edu_start <- career_start %>% filter(sector_code == "EDU") %>% select(DocId, Institution) %>% rename(Start = Institution)
+china_edu <- edu_china %>% rename(education = Institution)
+edu_to_start <- left_join(china_edu, edu_start)
+
+# Build a sankey diagram 
+
+edu_to_start_network <- edu_to_start %>% distinct(DocId, education, Start) %>% 
+  select(education, Start) %>% rename(source = education, target = Start)
+
+edu_to_start_network <-  edu_to_start_network %>% mutate(source = str_replace_all(source, "Foochow", "Fuzhou"))
+
+# Remove NA and compute weight 
+link3 <- edu_to_start_network %>%
+  group_by(source, target) %>% 
+  count() %>% 
+  rename(value = "n") %>% drop_na(target)
+
+link32 <-link3 %>% filter(value>1)
+
+# Create node list from edge list ; the node list contains every entity involved in the flow
+
+node3 <- data.frame(
+  name=c(as.character(link32$source), 
+         as.character(link32$target)) %>% unique()
+)
+
+# Create unique id for each connection
+link32$IDsource <- match(link32$source, node3$name)-1 
+link32$IDtarget <- match(link32$target, node3$name)-1
+
+
+```
+
+```{r message = FALSE, warning = FALSE}
+
+# Visualize the strongest flows
+
+library(networkD3)
+
+p3 <- sankeyNetwork(Links = link32, Nodes = node3,
+                    Source = "IDsource", Target = "IDtarget",
+                    Value = "value", NodeID = "name", 
+                    sinksRight=FALSE)
+p3
+
+
+# save the widget (optional)
+# library(htmlwidgets)
+# saveWidget(p1, file=paste0( getwd(), "~/Media/sankeys/edu_start.html"))
+
+```
+
+```{r message = FALSE, warning = FALSE}
+
+# Detailed list of return loops
+
+link3$same <-ifelse(link3$source==link3$target,"TRUE","FALSE")
+
+link3 %>% filter(same == "TRUE") %>% arrange(desc(value))
+
+```
