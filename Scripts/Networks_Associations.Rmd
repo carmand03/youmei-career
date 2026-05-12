@@ -28,6 +28,10 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(igraph)
+library(ggraph)
+library(ggrepel)
+library(visNetwork)
+library(scales)
 load(file = "assoc_networks.RData")
 
 ```
@@ -408,41 +412,202 @@ lvc3 <- cluster_louvain(assoc_net3)
 
 ```
 
+### Visualize communities
 
 ```{r warning = FALSE, message = FALSE}
 
-# Visualize Clustered Networks
+library(igraph)
+library(ggraph)
+library(ggplot2)
+library(ggrepel)
+library(visNetwork)
+library(scales)
+library(dplyr)
 
-V(assoc_net1)$group <- lvc1$membership  # create a group for each community
-V(assoc_net1)$color <- lvc1$membership # node color reflects group membership 
+# ── Helper: legible static plot ───────────────────────────────────────────────
 
-plot(lvc1, assoc_net1, 
-     vertex.label.color = "black", 
-     vertex.label.cex = 0.5, 
-     vertex.size=3,
-     main="Associative Network Before 1905", 
-     sub = "Clustering Using Louvain Algorithm")
-
-V(assoc_net2)$group <- lvc2$membership  # create a group for each community
-V(assoc_net2)$color <- lvc2$membership # node color reflects group membership 
-
-plot(lvc2, assoc_net2,
-     vertex.label.color = "black", 
-     vertex.label.cex = 0.5, 
-     vertex.size=3,
-     main="Associative Network, 1905-1911", 
-     sub = "Clustering Using Louvain Algorithm")
-
-V(assoc_net3)$group <- lvc3$membership  # create a group for each community
-V(assoc_net3)$color <- lvc3$membership # node color reflects group membership 
-
-plot(lvc3, assoc_net3, 
-     vertex.label.color = "black", 
-     vertex.label.cex = 0.5, 
-     vertex.size=3,
-     main="Associative Network, 1912-1917", 
-     sub = "Clustering Using Louvain Algorithm")
+make_static <- function(net, lvc, title, subtitle,
+                        top_n = 10,           # how many nodes to label
+                        seed  = 42) {
+  
+  # Centralities
+  deg <- degree(net, normalized = TRUE)
+  btw <- betweenness(net, normalized = TRUE)
+  
+  V(net)$degree      <- deg
+  V(net)$betweenness <- btw
+  V(net)$community   <- factor(lvc$membership)
+  
+  # Label only top-N nodes by degree
+  top_names     <- names(sort(deg, decreasing = TRUE)[1:top_n])
+  V(net)$label  <- ifelse(V(net)$name %in% top_names, V(net)$name, "")
+  
+  set.seed(seed)
+  
+  ggraph(net, layout = "fr") +
+    
+    # Edges
+    geom_edge_link(
+      aes(width = weight),        # ← map weight to width
+      alpha = 0.2,
+      color = "grey60"
+    ) +
+    
+    # Nodes — size = degree, fill = community
+    geom_node_point(
+      aes(size = degree, fill = community),
+      shape = 21, color = "white", stroke = 0.3
+    ) +
+    
+    # Repelled labels with white halo
+    geom_node_text(
+      aes(label = label),
+      repel              = TRUE,
+      size               = 2.8,
+      color              = "black",
+      bg.color           = "white",
+      bg.r               = 0.15,
+      box.padding        = unit(0.5, "lines"),
+      point.padding      = unit(0.4, "lines"),
+      max.overlaps       = Inf,
+      min.segment.length = 0.2,
+      segment.color      = "grey40",
+      segment.size       = 0.3
+    ) +
+    
+    scale_size_continuous(
+      range  = c(1, 9),
+      name   = "Degree centrality",
+      guide  = guide_legend(
+        override.aes = list(
+          fill   = "steelblue",   # give legend circles a visible fill
+          color  = "white",       # white border to match the plot
+          shape  = 21,
+          stroke = 0.3
+        )
+      )
+    ) +
+    # scale_fill_discrete(name = "Community") +
+    
+    scale_edge_width_continuous(
+      range = c(0.2, 3),
+      name  = "Edge weight",
+      guide = guide_legend(
+        override.aes = list(color = "grey50")   # visible lines in legend
+      )
+    ) +
+    
+    labs(title = title, subtitle = subtitle) +
+    
+    theme_graph(base_family = "sans") +
+    theme(
+      plot.title    = element_text(size = 12, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 9,  hjust = 0.5,
+                                   color = "grey40"),
+      legend.title  = element_text(size = 8),
+      legend.text   = element_text(size = 7)
+    )
+}
 
 ```
 
+```{r warning = FALSE, message = FALSE}
+p1
+p2
+p3
+```
+
+```{r eval = FALSE}
+
+# ── Optional: save to file ────────────────────────────────────────────────────
+ggsave("network_before1905.png", p1, width = 10, height = 8, dpi = 300)
+ggsave("network_1905_1911.png",  p2, width = 10, height = 8, dpi = 300)
+ggsave("network_1912_1917.png",  p3, width = 10, height = 8, dpi = 300)
+
+```
+
+### Interactive graphs
+```{r warning = FALSE, message = FALSE}
+
+# ── Helper: build a visNetwork from an igraph + louvain object ───────────────
+make_vis <- function(net, lvc, title) {
+  
+  deg <- degree(net, normalized = TRUE)
+  btw <- betweenness(net, normalized = TRUE)
+  
+  n_groups  <- max(lvc$membership)
+  pal       <- hue_pal()(n_groups)
+  grp_color <- pal[lvc$membership]
+  
+  nodes <- data.frame(
+    id    = V(net)$name,
+    label = V(net)$name,
+    group = lvc$membership,
+    color = grp_color,
+    value = rescale(deg, to = c(5, 40)),
+    title = paste0(
+      "<b>", V(net)$name, "</b><br>",
+      "Community: ",   lvc$membership, "<br>",
+      "Degree: ",      round(deg, 3),  "<br>",
+      "Betweenness: ", round(btw, 3)
+    ),
+    font.size        = 0,
+    stringsAsFactors = FALSE
+  )
+  
+  el         <- as_edgelist(net)
+  raw_weight <- E(net)$weight
+  
+  edges <- data.frame(
+    from  = el[, 1],
+    to    = el[, 2],
+    value = rescale(raw_weight, to = c(0.5, 6)),
+    title = paste0("Weight: ", round(raw_weight, 2)),
+    color = "rgba(150,150,150,0.3)",
+    stringsAsFactors = FALSE
+  )
+  
+  visNetwork(nodes, edges, main = title) %>%
+    visEdges(scaling = list(min = 0.5, max = 6)) %>%
+    visOptions(
+      highlightNearest = list(enabled = TRUE, degree = 1, hover = TRUE),
+      nodesIdSelection = TRUE
+    ) %>%
+    visPhysics(
+      solver = "forceAtlas2Based",
+      forceAtlas2Based = list(gravitationalConstant = -50),
+      stabilization    = list(iterations = 200)
+    ) %>%
+    visInteraction(
+      hover             = TRUE,
+      tooltipDelay      = 100,
+      navigationButtons = TRUE
+    ) %>%
+    visLayout(randomSeed = 42)
+}
+
+# ── Render all three ─────────────────────────────────────────────────────────
+vis1 <- make_vis(assoc_net1, lvc1, "Associative Network Before 1905")
+vis2 <- make_vis(assoc_net2, lvc2, "Associative Network 1905–1911")
+vis3 <- make_vis(assoc_net3, lvc3, "Associative Network 1912–1917")
+
+```
+
+```{r warning = FALSE, message = FALSE}
+
+vis1
+vis2
+vis3
+
+```
+
+```{r eval = FALSE}
+# ── Optional: save to file ────────────────────────────────────────────────────
+library(htmlwidgets)
+
+saveWidget(vis1, "network_before1905.html", selfcontained = TRUE)
+saveWidget(vis2, "network_1905_1911.html",  selfcontained = TRUE)
+saveWidget(vis3, "network_1912_1917.html",  selfcontained = TRUE)
+
+```
 
