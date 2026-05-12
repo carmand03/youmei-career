@@ -18,5 +18,5 @@ This study uses a combination of network and sequence analysis to explore three 
 The repository is organized into three main folders:
 
   (1) **Data**: all datasets required to reproduce the analyses and visualizations, including both original and derived data (RData format);
-(2) **Scripts**: full code and documentation (R Markdown and HTML) for reproducing the analyses and visualizations. Scripts are organized by method family and broadly follow the structure of the paper;
-(3) **Media**: figures used in the paper (with some interactive visualizations for improved legibility).
+  (2) **Scripts**: full code and documentation (R Markdown and HTML) for reproducing the analyses and visualizations. Scripts are organized by method family and broadly follow the structure of the paper;
+  (3) **Media**: figures used in the paper (with some interactive visualizations for improved legibility).
